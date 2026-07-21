@@ -241,7 +241,7 @@ public partial class SphericalPlayer : CharacterBody3D
     private void UpdateHealthLabel()
     {
         _healthLabel.Visible = !GameSession.IsCreative;
-        _healthLabel.Text = $"Vie : {Mathf.CeilToInt(Health)} / 100";
+        _healthLabel.Text = $"Health: {Mathf.CeilToInt(Health)} / 100";
     }
 
     private void UpdateFlashlight(float delta)

@@ -159,7 +159,7 @@ offset_left = 14.0
 offset_top = 10.0
 offset_right = 390.0
 offset_bottom = 75.0
-text = "HexaSpherical Sandbox — Alpha 0.0.3\nF5 : troisième personne   G : lampe torche\nF10 : sauvegarder et quitter"
+text = "HexaSpherical Sandbox — Alpha 0.0.3\nF5: third-person view   G: flashlight\nF10: save and quit"
 
 [node name="Crosshair" type="Label" parent="HUD"]
 anchors_preset = 8
@@ -189,7 +189,7 @@ offset_bottom = 48.0
 grow_horizontal = 0
 theme_override_colors/font_color = Color(1, 0.92, 0.75, 1)
 theme_override_font_sizes/font_size = 18
-text = "12:00 — Jour"
+text = "12:00 — Day"
 horizontal_alignment = 2
 
 [node name="FlightLabel" type="Label" parent="HUD"]
@@ -207,7 +207,7 @@ grow_horizontal = 2
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.65, 0.9, 1, 1)
 theme_override_font_sizes/font_size = 18
-text = "MODE VOL ACTIF"
+text = "FLIGHT MODE ACTIVE"
 horizontal_alignment = 1
 
 [node name="HealthLabel" type="Label" parent="HUD"]
@@ -221,7 +221,7 @@ offset_bottom = -18.0
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.95, 0.25, 0.22, 1)
 theme_override_font_sizes/font_size = 18
-text = "Vie : 100 / 100"
+text = "Health: 100 / 100"
 
 [node name="RareEventLabel" type="Label" parent="HUD"]
 visible = false
@@ -232,5 +232,5 @@ offset_bottom = 175.0
 grow_horizontal = 2
 theme_override_colors/font_color = Color(1, 0.82, 0.18, 1)
 theme_override_font_sizes/font_size = 27
-text = "ÉVÉNEMENT RARISSIME"
+text = "EXTREMELY RARE EVENT"
 horizontal_alignment = 1

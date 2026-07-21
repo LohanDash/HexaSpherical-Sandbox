@@ -116,8 +116,8 @@ public partial class EcosystemManager : Node3D
         // Equivalent average probability to 1/10,000 each second, checked in
         // a single coarse batch every 30 seconds instead of every frame/second.
         if (GD.Randi() % 10000 >= 30) return;
-        string[] events = ["PLUIE DE POULETS", "UN ESCARGOT TRAVERSE LE CIEL",
-            "84 ÉTOURNEAUX INVOQUENT MEGAKOTKOT", "UNE VACHE ENTRE EN ORBITE"];
+        string[] events = ["CHICKEN RAIN", "A SNAIL CROSSES THE SKY",
+            "84 STARLINGS SUMMON MEGAKOTKOT", "A COW ENTERS ORBIT"];
         _eventLabel.Text = events[GD.RandRange(0, events.Length - 1)];
         _eventLabel.Modulate = Colors.White;
         _eventLabel.Visible = true;

@@ -12,7 +12,7 @@ public sealed class WorldData
     public int SaveVersion { get; set; }
     public long SaveGeneration { get; set; }
     public string Id { get; set; } = "";
-    public string Name { get; set; } = "Nouveau monde";
+    public string Name { get; set; } = "New World";
     public string GameMode { get; set; } = "Creative";
     public int Seed { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
@@ -56,7 +56,7 @@ public static class WorldStore
     public static WorldData Create(string name, string mode)
     {
         var world = new WorldData {
-            Id = Guid.NewGuid().ToString("N"), Name = string.IsNullOrWhiteSpace(name) ? "Nouveau monde" : name.Trim(),
+            Id = Guid.NewGuid().ToString("N"), Name = string.IsNullOrWhiteSpace(name) ? "New World" : name.Trim(),
             GameMode = mode, Seed = Random.Shared.Next(1, int.MaxValue), SaveVersion = 5
         };
         WorldSaveManager.Instance.Flush(world, TimeSpan.FromSeconds(8));

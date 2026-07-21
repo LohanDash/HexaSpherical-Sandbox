@@ -25,6 +25,7 @@ public partial class Main : Node3D
 
     public override void _Ready()
     {
+        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.3");
         var environment = new Environment
         {
             BackgroundMode = Environment.BGMode.Color,
@@ -115,7 +116,7 @@ public partial class Main : Node3D
         float localHour = Mathf.PosMod((_dayAngle - localNoonAngle) / Mathf.Tau * 24f + 12f, 24f);
         int hours = Mathf.FloorToInt(localHour);
         int minutes = Mathf.FloorToInt((localHour - hours) * 60f);
-        string phase = daylight > 0.65f ? "Jour" : daylight < 0.15f ? "Nuit" : "Crépuscule";
+        string phase = daylight > 0.65f ? "Day" : daylight < 0.15f ? "Night" : "Twilight";
         _timeLabel.Text = $"{hours:00}:{minutes:00} — {phase}";
     }
 

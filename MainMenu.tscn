@@ -51,7 +51,7 @@ theme_override_constants/separation = 10
 [node name="Header" type="Label" parent="Center/Panel/Layout"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 22
-text = "Tes mondes"
+text = "Your worlds"
 
 [node name="Worlds" type="ItemList" parent="Center/Panel/Layout"]
 custom_minimum_size = Vector2(580, 210)
@@ -60,22 +60,22 @@ layout_mode = 2
 [node name="Details" type="Label" parent="Center/Panel/Layout"]
 custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
-text = "Sélectionne un monde."
+text = "Select a world."
 
 [node name="Load" type="Button" parent="Center/Panel/Layout"]
 layout_mode = 2
-text = "Jouer au monde sélectionné"
+text = "Play selected world"
 
 [node name="Delete" type="Button" parent="Center/Panel/Layout"]
 layout_mode = 2
-text = "Supprimer le monde sélectionné"
+text = "Delete selected world"
 
 [node name="Separator" type="HSeparator" parent="Center/Panel/Layout"]
 layout_mode = 2
 
 [node name="NewName" type="LineEdit" parent="Center/Panel/Layout"]
 layout_mode = 2
-placeholder_text = "Nom du nouveau monde"
+placeholder_text = "New world name"
 
 [node name="Mode" type="OptionButton" parent="Center/Panel/Layout"]
 layout_mode = 2
@@ -86,13 +86,13 @@ layout_mode = 2
 [node name="Weather" type="CheckButton" parent="Center/Panel/Layout"]
 layout_mode = 2
 button_pressed = true
-text = "Météo locale sphérique"
+text = "Spherical local weather"
 
 [node name="Interpolation" type="CheckButton" parent="Center/Panel/Layout"]
 layout_mode = 2
 button_pressed = true
-text = "Interpolation fluide"
+text = "Smooth interpolation"
 
 [node name="Create" type="Button" parent="Center/Panel/Layout"]
 layout_mode = 2
-text = "Créer et jouer"
+text = "Create and play"

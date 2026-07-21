@@ -1,51 +1,68 @@
 # HexaSpherical Sandbox — Alpha 0.0.3
 
-Premier prototype Godot 4 C# d'une planète procédurale sphérique pavée de cellules
-hexagonales et de 12 pentagones.
+An early Godot 4 C# prototype featuring a procedurally generated spherical planet
+tiled with hexagonal cells and 12 structural pentagons.
 
-La planète de l'Alpha 0.0.3 possède un rayon de 36 mètres et environ 10 000
-cellules, générées progressivement chunk par chunk.
+The Alpha 0.0.3 planet has a radius of 36 metres and approximately 10,000 cells,
+generated progressively, one chunk at a time.
 
-Le terrain utilise un streaming sphérique autour du joueur : les 12 mètres les
-plus proches affichent les voxels et grottes complets, la zone allant jusqu'à 26
-mètres utilise une surface simplifiée, et les chunks plus éloignés sont déchargés.
+The terrain uses spherical streaming around the player. The nearest 12 metres
+display complete voxels and caves, the area up to 26 metres uses a simplified
+surface, and more distant chunks are unloaded.
 
-Le sous-sol contient des chambres et tunnels interconnectés. De rares puits
-naturels peuvent relier directement la surface au réseau de grottes.
+The underground contains interconnected chambers and tunnels. Rare natural shafts
+can connect the surface directly to the cave network.
 
-## Lancer
+## Running the game
 
-Double-cliquer sur `Open HexaSpherical Sandbox.bat`, puis appuyer sur `F6`/`F5`.
-Ce lanceur configure explicitement le SDK .NET pour éviter les problèmes de `PATH`
-après une nouvelle installation. Il est également possible d'ouvrir `project.godot`
-avec **Godot Engine (Mono)** après avoir redémarré la session Windows.
+Double-click `Open HexaSpherical Sandbox.bat`, then press `F6`/`F5`. The launcher
+explicitly configures the .NET SDK to avoid `PATH` issues after a new installation.
+You can also open `project.godot` with **Godot Engine (Mono)** after restarting your
+Windows session.
 
-- ZQSD ou WASD : déplacement
-- Souris : caméra FPS
-- Espace : saut
-- Échap : libérer/capturer la souris
-- Clic gauche : casser le bloc supérieur visé
-- Clic droit : poser un bloc sur la cellule visée
-- F5 pendant la partie : basculer entre vue FPS et troisième personne
-- G : allumer ou éteindre la lampe torche directionnelle
-- Double Espace : activer ou désactiver le vol créatif
-- Espace / Maj en vol : monter / descendre
+- ZQSD or WASD: move
+- Mouse: FPS camera
+- Space: jump
+- Escape: release or capture the mouse
+- Left click: break the targeted block
+- Right click: place a block on the targeted cell
+- F5: switch between first-person and third-person view
+- G: toggle the directional flashlight
+- Double-tap Space: toggle creative flight
+- Space / Shift while flying: ascend / descend
+- F6: toggle smooth interpolation
+- F8: toggle spherical local weather
+- F10: save and return to the main menu
 
-Un cycle jour/nuit complet dure cinq minutes par défaut. L'heure locale dépend
-également de la position du joueur sur la planète : voyager autour du globe fait
-donc naturellement avancer ou reculer le soleil dans le ciel.
+A full day/night cycle lasts five minutes by default. Local time also depends on
+the player's position on the planet, so travelling around the globe naturally
+moves the sun and moon across the sky.
 
-## Musique dynamique
+## Worlds and saves
 
-La surface alterne Aria Math et Mice on Venus selon une rotation probabiliste.
-Entrer dans une grotte interrompt la musique de surface. Après un délai de 5 à 10
-secondes, un tirage de 1 % est effectué chaque seconde pour lancer 13. Une fois
-déclenché, il ne peut plus revenir avant une sortie puis une nouvelle entrée.
-Dire Dire Docks, Far, Chirp, Mellohi et Stal sont enregistrés pour les futurs
-contextes océan, espace, mort survie, mort hardcore et jukebox.
+The main menu can create, load, and delete worlds with Creative or Survival mode,
+quality settings, weather, and interpolation preferences. World seeds are immutable.
+Saves use versioned snapshots, checksums, a single background writer, and automatic
+recovery from `world.save`, `world.tmp`, or `world.backup`.
 
-Les MP3 placés dans `Music/` sont des ressources locales optionnelles et ne sont
-pas distribués dans le dépôt public. Le jeu reste fonctionnel lorsqu'ils manquent.
+## Living ecosystem
 
-Les pentagones structurels sont colorés en violet afin de les rendre visibles dans
-ce prototype. Le terrain est déterministe et dépend de `Seed` dans le nœud Planet.
+Cows and chickens inhabit loaded terrain chunks. Starling murmurations react to an
+aerial predator, weather moves around the spherical planet, and nocturnal wildlife
+appears after dark. Entity populations and important ecosystem state are saved with
+the world, while distant chunks remain unloaded for performance.
+
+## Dynamic music
+
+The surface alternates between Aria Math and Mice on Venus using a probabilistic
+rotation. Entering a cave stops surface music. After a delay of 5 to 10 seconds,
+the game makes a 1% roll every second to play 13. Once triggered, it cannot play
+again until the player exits and re-enters a cave. Dire Dire Docks, Far, Chirp,
+Mellohi, and Stal are registered for future ocean, space, Survival death, Hardcore
+death, and jukebox contexts.
+
+MP3 files placed in `Music/` are optional local resources and are not distributed
+in the public repository. The game remains functional when they are missing.
+
+Structural pentagons are coloured purple to keep them visible in this prototype.
+Terrain generation is deterministic and uses each world's immutable seed.

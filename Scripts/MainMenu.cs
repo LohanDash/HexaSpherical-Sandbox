@@ -17,6 +17,7 @@ public partial class MainMenu : Control
 
     public override void _Ready()
     {
+        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.3");
         _worldList = GetNode<ItemList>("Center/Panel/Layout/Worlds");
         _name = GetNode<LineEdit>("Center/Panel/Layout/NewName");
         _mode = GetNode<OptionButton>("Center/Panel/Layout/Mode");
@@ -24,10 +25,10 @@ public partial class MainMenu : Control
         _weather = GetNode<CheckButton>("Center/Panel/Layout/Weather");
         _interpolation = GetNode<CheckButton>("Center/Panel/Layout/Interpolation");
         _details = GetNode<Label>("Center/Panel/Layout/Details");
-        _mode.AddItem("Créatif"); _mode.AddItem("Survie");
-        _quality.AddItem("Faible — conseillé pour le portable");
-        _quality.AddItem("Équilibré");
-        _quality.AddItem("Élevé — PC fixe");
+        _mode.AddItem("Creative"); _mode.AddItem("Survival");
+        _quality.AddItem("Low — recommended for laptops");
+        _quality.AddItem("Balanced");
+        _quality.AddItem("High — desktop PC");
         _worldList.ItemSelected += index => ShowDetails((int)index);
         GetNode<Button>("Center/Panel/Layout/Create").Pressed += CreateWorld;
         GetNode<Button>("Center/Panel/Layout/Load").Pressed += LoadWorld;
@@ -40,14 +41,14 @@ public partial class MainMenu : Control
     {
         _worlds.Clear(); _worlds.AddRange(WorldStore.List()); _worldList.Clear();
         foreach (var world in _worlds)
-            _worldList.AddItem($"{world.Name} — {(world.GameMode == "Creative" ? "Créatif" : "Survie")} — seed {world.Seed}");
-        _details.Text = _worlds.Count == 0 ? "Aucun monde. Crée ton premier monde." : "Sélectionne un monde.";
+            _worldList.AddItem($"{world.Name} — {(world.GameMode == "Creative" ? "Creative" : "Survival")} — seed {world.Seed}");
+        _details.Text = _worlds.Count == 0 ? "No worlds yet. Create your first world." : "Select a world.";
     }
 
     private void ShowDetails(int index)
     {
         var world = _worlds[index];
-        _details.Text = $"Seed : {world.Seed}\nCréé : {world.CreatedUtc.ToLocalTime():g}\nDernière partie : {world.UpdatedUtc.ToLocalTime():g}";
+        _details.Text = $"Seed: {world.Seed}\nCreated: {world.CreatedUtc.ToLocalTime():g}\nLast played: {world.UpdatedUtc.ToLocalTime():g}";
     }
 
     private void CreateWorld()
