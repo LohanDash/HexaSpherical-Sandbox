@@ -5,7 +5,7 @@ tiled with hexagonal cells and 12 structural pentagons.
 
 New Alpha Indev worlds use a planet with a radius of 288 metres eight times the
 PreIndev radius and approximately 164,000 cells. The original 36 metre planet
-remains available through the **PreIndev** generation preset. Existing worlds
+remains available through the PreIndev generation preset. Existing worlds
 automatically keep their original generation and are never resized.
 
 The terrain uses spherical streaming around the player. The nearest 12 metres
@@ -21,7 +21,7 @@ the cave field cannot flatten or perforate entire landscapes.
 
 Double-click `Open HexaSpherical Sandbox.bat`, then press `F6`/`F5`. The launcher
 explicitly configures the .NET SDK to avoid `PATH` issues after a new installation.
-You can also open `project.godot` with **Godot Engine (Mono)** after restarting your
+You can also open `project.godot` with Godot Engine (Mono) after restarting your
 Windows session.
 
 - ZQSD or WASD: move
