@@ -15,3 +15,9 @@ Thumbs.db
 
 # Local licensed music assets are intentionally not redistributed.
 Music/
+
+# Supplied Unity source package and generated conversion output. The package
+# contained no redistribution licence, so these stay local until one is found.
+Blocs/
+Blocks/
+Tools/

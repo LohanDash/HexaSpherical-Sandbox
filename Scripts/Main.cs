@@ -18,14 +18,25 @@ public partial class Main : Node3D
     private HexPlanet _planet = null!;
     private MobManager _mobs = null!;
     public float Daylight { get; private set; } = 1f;
+    public float LocalHour { get; private set; } = 12f;
     private bool _localStorm;
     private float _stormBlend;
+    private bool _exitSaveCompleted;
+    private Vector3 _lastValidPlayerPosition;
 
     public void SetLocalStorm(bool storming) => _localStorm = storming;
 
+    public void SaveAndReturnToMenu()
+    {
+        SaveCurrentWorld(flush: true);
+        _exitSaveCompleted = true;
+        GetTree().Paused = false;
+        GetTree().ChangeSceneToFile("res://MainMenu.tscn");
+    }
+
     public override void _Ready()
     {
-        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.3");
+        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha Indev");
         var environment = new Environment
         {
             BackgroundMode = Environment.BGMode.Color,
@@ -44,6 +55,7 @@ public partial class Main : Node3D
         _moonBody = GetNode<MeshInstance3D>("MoonBody");
         _sun.ShadowEnabled = GameSession.Current?.Quality != "Low";
         _player = GetNode<Node3D>("Player");
+        _lastValidPlayerPosition = _player.GlobalPosition;
         _timeLabel = GetNode<Label>("HUD/TimeLabel");
         _planet = GetNode<HexPlanet>("Planet");
         _mobs = GetNode<MobManager>("MobManager");
@@ -57,6 +69,8 @@ public partial class Main : Node3D
     public override void _Process(double deltaValue)
     {
         float delta = (float)deltaValue;
+        if (IsInstanceValid(_player) && _player.IsInsideTree() && _player.GlobalPosition.LengthSquared() > 1f)
+            _lastValidPlayerPosition = _player.GlobalPosition;
         _stormBlend = Mathf.MoveToward(_stormBlend, _localStorm ? 1f : 0f, delta * 0.32f);
         if (GameSession.Current != null) SimulationClock.AdvanceLoaded(GameSession.Current, delta);
         _saveCountdown -= delta;
@@ -100,13 +114,12 @@ public partial class Main : Node3D
         Color uniformSky = nightTop.Lerp(dayTop, daylight).Lerp(sunset, twilight * 0.55f);
         if (_stormBlend > 0.001f)
         {
-            Color stormSky = new Color(0.22f, 0.25f, 0.29f)
-                .Lerp(new Color(0.4f, 0.42f, 0.44f), daylight);
-            uniformSky = uniformSky.Lerp(stormSky, _stormBlend);
-            _sun.LightEnergy *= Mathf.Lerp(1f, 0.42f, _stormBlend);
-            environment.AmbientLightEnergy *= Mathf.Lerp(1f, 0.68f, _stormBlend);
+            // Rain is local and represented by the cloud front itself. Keep the
+            // distant sky visible instead of replacing the whole hemisphere by gray.
+            _sun.LightEnergy *= Mathf.Lerp(1f, 0.72f, _stormBlend);
+            environment.AmbientLightEnergy *= Mathf.Lerp(1f, 0.84f, _stormBlend);
             environment.AmbientLightColor = environment.AmbientLightColor
-                .Lerp(new Color(0.34f, 0.37f, 0.4f), 0.72f * _stormBlend);
+                .Lerp(new Color(0.4f, 0.44f, 0.5f), 0.28f * _stormBlend);
         }
         environment.BackgroundColor = uniformSky;
 
@@ -114,6 +127,7 @@ public partial class Main : Node3D
         float localB = localUp.Y * Mathf.Cos(axialTilt) + localUp.Z * Mathf.Sin(axialTilt);
         float localNoonAngle = Mathf.Atan2(localB, localA);
         float localHour = Mathf.PosMod((_dayAngle - localNoonAngle) / Mathf.Tau * 24f + 12f, 24f);
+        LocalHour = localHour;
         int hours = Mathf.FloorToInt(localHour);
         int minutes = Mathf.FloorToInt((localHour - hours) * 60f);
         string phase = daylight > 0.65f ? "Day" : daylight < 0.15f ? "Night" : "Twilight";
@@ -122,9 +136,16 @@ public partial class Main : Node3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.Escape })
+        {
+            GetNode<PauseMenu>("PauseMenu").Toggle();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.F10 })
         {
-            SaveCurrentWorld();
+            SaveCurrentWorld(flush: true);
+            _exitSaveCompleted = true;
             GetTree().ChangeSceneToFile("res://MainMenu.tscn");
         }
         if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.F8 }
@@ -137,14 +158,17 @@ public partial class Main : Node3D
 
     public override void _ExitTree()
     {
-        SaveCurrentWorld(flush: true);
+        if (!_exitSaveCompleted) SaveCurrentWorld(flush: true);
     }
 
     private void SaveCurrentWorld(bool flush = false)
     {
         var world = GameSession.Current;
         if (world == null || !IsInstanceValid(_player) || !IsInstanceValid(_planet)) return;
-        Vector3 position = _player.GlobalPosition;
+        Vector3 position = _player.IsInsideTree() ? _player.GlobalPosition : _lastValidPlayerPosition;
+        // Scene replacement removes/reparents nodes in stages. Never let that
+        // teardown state overwrite a valid player position with the origin.
+        if (position.LengthSquared() < 1f) return;
         world.PlayerPosition = [position.X, position.Y, position.Z];
         if (_player is SphericalPlayer sphericalPlayer) world.Health = sphericalPlayer.Health;
         world.DayAngle = _dayAngle;

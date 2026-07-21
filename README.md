@@ -1,17 +1,21 @@
-# HexaSpherical Sandbox — Alpha 0.0.3
+# HexaSpherical Sandbox — Alpha Indev
 
 An early Godot 4 C# prototype featuring a procedurally generated spherical planet
 tiled with hexagonal cells and 12 structural pentagons.
 
-The Alpha 0.0.3 planet has a radius of 36 metres and approximately 10,000 cells,
-generated progressively, one chunk at a time.
+New Alpha Indev worlds use a planet with a radius of 288 metres—eight times the
+PreIndev radius—and approximately 164,000 cells. The original 36-metre planet
+remains available through the **PreIndev** generation preset. Existing worlds
+automatically keep their original generation and are never resized.
 
 The terrain uses spherical streaming around the player. The nearest 12 metres
 display complete voxels and caves, the area up to 26 metres uses a simplified
 surface, and more distant chunks are unloaded.
 
 The underground contains interconnected chambers and tunnels. Rare natural shafts
-can connect the surface directly to the cave network.
+can connect the surface directly to the cave network. Alpha Indev caves preserve
+three solid layers beneath normal terrain and use much rarer surface entrances, so
+the cave field cannot flatten or perforate entire landscapes.
 
 ## Running the game
 
@@ -26,13 +30,48 @@ Windows session.
 - Escape: release or capture the mouse
 - Left click: break the targeted block
 - Right click: place a block on the targeted cell
-- F5: switch between first-person and third-person view
+- F5: cycle FPS → rear TPS → selfie view
+- E: open the inventory and built-in 3 × 3 crafting grid
+- Hold left click in Survival: progressively mine a block
+
+## Early Survival loop
+
+- Pick up fallen twigs beneath occasional trees.
+- Place three twigs vertically to craft a stick.
+- Dig stone-bearing ground with a stick to obtain a pebble without breaking the block.
+- Craft an axe with one pebble above two vertical sticks.
+- Craft a Primitive Pickaxe with three pebbles above two vertical sticks. It mines
+  exactly four stone blocks, then returns one stick and one pebble.
+- Use stone blocks to craft the much more durable Stone Pickaxe and Stone Axe.
+- Only an axe can fell a tree and produce wood.
+- Eight wood around an empty crafting centre produce a campfire.
+- Use raw meat near a campfire to cook it. Eating it raw causes lethal food poisoning.
 - G: toggle the directional flashlight
 - Double-tap Space: toggle creative flight
 - Space / Shift while flying: ascend / descend
+- Shift while grounded: sprint
+- T or /: open chat and commands
+- 1–9 or mouse wheel: select a hotbar slot
+- E: open the blocks and spawn-eggs inventory
 - F6: toggle smooth interpolation
 - F8: toggle spherical local weather
+- Escape: pause the game and adjust render distance
 - F10: save and return to the main menu
+
+Survival mode includes health hearts, fall and monster damage, death, respawning,
+two nocturnal enemy types, and a persistent hex-block stack in the hotbar. Creative
+flight moves faster than walking. Use `/gamemode creative`, `/gamemode survival`,
+`/gamemode 1`, or `/gamemode 0` to change modes while playing.
+
+The nine-slot hotbar and 27-slot inventory start empty in new worlds. Stacks can
+be dragged between the hotbar, inventory, and persistent 3 × 3 crafting grid;
+right-click splits a stack. Creative mode provides a separate item catalogue.
+Placed block types, inventory slots, crafting slots, and tool durability persist
+in world saves.
+
+Block metadata is centralized with stable IDs, colours, names, and reserved texture
+paths under `Textures/Blocks/`, preparing both terrain rendering and inventory icons
+for future texture assets without changing the save format.
 
 A full day/night cycle lasts five minutes by default. Local time also depends on
 the player's position on the planet, so travelling around the globe naturally

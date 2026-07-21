@@ -5,22 +5,30 @@ namespace HexaSphericalSandbox;
 
 public partial class EcosystemManager : Node3D
 {
-    private const int CloudCount = 26;
-    private const int RainCount = 52;
+    private const int RainCount = 72;
+    private const float CloudAltitude = 120f;
     private Main _main = null!;
     private Node3D _player = null!;
     private HexPlanet _planet = null!;
-    private MultiMeshInstance3D _clouds = null!;
+    private MeshInstance3D _clouds = null!;
+    private ShaderMaterial _cloudMaterial = null!;
     private MultiMeshInstance3D _rain = null!;
     private MeshInstance3D _owl = null!;
-    private readonly Vector3[] _cloudDirections = new Vector3[CloudCount];
     private readonly Vector3[] _rainOffsets = new Vector3[RainCount];
-    private Vector3 _stormDirection = new(0.7f, 0.2f, -0.68f);
     private float _time;
     private float _visualTick;
     private float _ecologyTick;
     private float _rareRoll;
+    private float _rainDecisionTick;
+    private float _weatherSampleTick;
+    private int _weatherBand = -1;
+    private bool _localRain;
     private Label _eventLabel = null!;
+
+    public float MinimumCloudClearance()
+    {
+        return CloudAltitude;
+    }
 
     public override void _Ready()
     {
@@ -28,22 +36,15 @@ public partial class EcosystemManager : Node3D
         _player = GetNode<Node3D>("../Player");
         _planet = GetNode<HexPlanet>("../Planet");
         _eventLabel = GetNode<Label>("../HUD/RareEventLabel");
-        _clouds = CreateInstances("Clouds", new SphereMesh { Radius = 2.5f, Height = 3.2f, RadialSegments = 8, Rings = 4 },
-            CloudCount, new Color(0.82f, 0.87f, 0.9f, 0.82f), false);
+        _clouds = CreateCloudInstances();
         _rain = CreateInstances("LocalRain", new BoxMesh { Size = new Vector3(0.025f, 0.55f, 0.025f) },
             RainCount, new Color(0.35f, 0.58f, 0.9f, 0.72f), true);
         _owl = new MeshInstance3D { Name = "NightOwl", Mesh = new SphereMesh { Radius = 0.32f, Height = 0.7f, RadialSegments = 7, Rings = 4 } };
         _owl.MaterialOverride = Material(new Color(0.22f, 0.16f, 0.11f), false);
         AddChild(_owl);
 
-        for (int i = 0; i < CloudCount; i++)
-        {
-            float y = 1f - 2f * (i + 0.5f) / CloudCount;
-            float radius = Mathf.Sqrt(1f - y * y);
-            float angle = i * 2.399963f;
-            _cloudDirections[i] = new Vector3(Mathf.Cos(angle) * radius, y, Mathf.Sin(angle) * radius);
-        }
         for (int i = 0; i < RainCount; i++) _rainOffsets[i] = RandomTangentOffset(7f, 8f);
+        UpdateVisuals(0f);
     }
 
     public override void _Process(double deltaValue)
@@ -71,19 +72,12 @@ public partial class EcosystemManager : Node3D
         WorldData? world = GameSession.Current;
         bool weather = world?.WeatherEnabled ?? true;
         Vector3 up = _player.GlobalPosition.Normalized();
-        Basis rotation = new Basis(Vector3.Up, _time * 0.012f);
-        for (int i = 0; i < CloudCount; i++)
-        {
-            Vector3 direction = rotation * _cloudDirections[i];
-            float scale = 0.65f + (i % 5) * 0.12f;
-            _clouds.Multimesh.SetInstanceTransform(i,
-                new Transform3D(Basis.Identity.Scaled(new Vector3(1.8f, 0.55f, 1f) * scale), direction * (_planet.Radius + 16f)));
-        }
         _clouds.Visible = weather;
-        _stormDirection = (new Basis(Vector3.Up, delta * 0.04f) * _stormDirection).Normalized();
-        bool localRain = weather && up.Dot(_stormDirection) > 0f;
-        _main.SetLocalStorm(localRain);
-        _rain.Visible = localRain;
+        _cloudMaterial.SetShaderParameter("daylight", _main.Daylight);
+        UpdateLocalRain(weather, CloudDensity(up, _time), delta);
+        _main.SetLocalStorm(_localRain);
+        _rain.Visible = _localRain;
+        SoundManager.SetRain(_localRain);
         Vector3 tangentA = up.Cross(Mathf.Abs(up.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
         Vector3 tangentB = up.Cross(tangentA).Normalized();
         for (int i = 0; i < RainCount; i++)
@@ -132,10 +126,119 @@ public partial class EcosystemManager : Node3D
         return instance;
     }
 
+    private MeshInstance3D CreateCloudInstances()
+    {
+        var shader = new Shader
+        {
+            Code = """
+                shader_type spatial;
+                render_mode blend_mix, depth_prepass_alpha, cull_disabled, unshaded;
+                uniform float daylight = 1.0;
+                varying vec3 sphere_direction;
+
+                float random3(vec3 p) {
+                    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+                }
+                float value_noise(vec3 p) {
+                    vec3 i = floor(p);
+                    vec3 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    float a = mix(random3(i), random3(i + vec3(1,0,0)), f.x);
+                    float b = mix(random3(i + vec3(0,1,0)), random3(i + vec3(1,1,0)), f.x);
+                    float c = mix(random3(i + vec3(0,0,1)), random3(i + vec3(1,0,1)), f.x);
+                    float d = mix(random3(i + vec3(0,1,1)), random3(i + vec3(1,1,1)), f.x);
+                    return mix(mix(a, b, f.y), mix(c, d, f.y), f.z);
+                }
+                float fbm(vec3 p) {
+                    float total = 0.0;
+                    float amplitude = 0.56;
+                    for (int octave = 0; octave < 4; octave++) {
+                        total += value_noise(p) * amplitude;
+                        p = p * 2.03 + vec3(17.2, 9.4, 13.7);
+                        amplitude *= 0.48;
+                    }
+                    return total;
+                }
+                void vertex() {
+                    sphere_direction = normalize(VERTEX);
+                }
+                void fragment() {
+                    vec3 direction = normalize(sphere_direction);
+                    vec3 wind = vec3(TIME * 0.0045, TIME * 0.0012, -TIME * 0.0028);
+                    float continent = fbm(direction * 2.15 + wind);
+                    float formations = fbm(direction * 6.4 + wind * 1.8 + vec3(8.1, 2.4, 5.7));
+                    float detail = fbm(direction * 17.0 - wind * 0.7);
+                    float field = continent * 0.70 + formations * 0.25 + detail * 0.10;
+                    float density = smoothstep(0.49, 0.64, field);
+                    if (density < 0.02) discard;
+                    float lightness = mix(0.66, 1.0, detail);
+                    vec3 day_cloud = vec3(lightness, lightness * 1.01, lightness * 1.035);
+                    vec3 night_cloud = vec3(0.018, 0.022, 0.035) * mix(0.65, 1.35, detail);
+                    ALBEDO = mix(night_cloud, day_cloud, smoothstep(0.08, 0.48, daylight));
+                    ALPHA = density * 0.88;
+                }
+                """
+        };
+        float radius = _planet.Radius + CloudAltitude;
+        _cloudMaterial = new ShaderMaterial { Shader = shader };
+        var sphere = new SphereMesh
+        {
+            Radius = radius,
+            Height = radius * 2f,
+            RadialSegments = 96,
+            Rings = 48,
+            Material = _cloudMaterial
+        };
+        var instance = new MeshInstance3D { Name = "GlobalCloudLayer", Mesh = sphere };
+        AddChild(instance);
+        return instance;
+    }
+
+    private static float CloudDensity(Vector3 direction, float time)
+    {
+        // Cheap CPU counterpart of the broad shader field. It creates long
+        // weather fronts with genuinely clear regions without sampling the GPU.
+        Vector3 p = direction.Normalized();
+        float a = Mathf.Sin(p.X * 5.1f + p.Y * 2.7f + time * 0.018f);
+        float b = Mathf.Sin(p.Y * 7.3f - p.Z * 4.4f - time * 0.011f);
+        float c = Mathf.Sin((p.X + p.Z) * 11.2f + time * 0.007f);
+        return 0.5f + (a * 0.23f + b * 0.18f + c * 0.09f);
+    }
+
+    private void UpdateLocalRain(bool weatherEnabled, float density, float delta)
+    {
+        if (!weatherEnabled)
+        {
+            _localRain = false;
+            _weatherBand = -1;
+            _rainDecisionTick = 0f;
+            _weatherSampleTick = 0f;
+            return;
+        }
+
+        // Five visible coverage bands. Only the top two are capable of rain:
+        // very cloudy = 50%, cloudy = 10%, every clearer band = 0%.
+        _weatherSampleTick -= delta;
+        _rainDecisionTick -= delta;
+        if (_weatherSampleTick > 0f) return;
+        _weatherSampleTick = 2f;
+
+        int band = density >= 0.72f ? 4
+            : density >= 0.58f ? 3
+            : density >= 0.46f ? 2
+            : density >= 0.34f ? 1 : 0;
+        if (band == _weatherBand && _rainDecisionTick > 0f) return;
+
+        _weatherBand = band;
+        _rainDecisionTick = 24f;
+        float rainChance = band == 4 ? 0.50f : band == 3 ? 0.10f : 0f;
+        _localRain = rainChance > 0f && GD.Randf() < rainChance;
+    }
+
     private static StandardMaterial3D Material(Color color, bool emission) => new()
     {
         AlbedoColor = color, Transparency = color.A < 1f ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled,
-        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        ShadingMode = emission ? BaseMaterial3D.ShadingModeEnum.Unshaded : BaseMaterial3D.ShadingModeEnum.PerPixel,
         EmissionEnabled = emission, Emission = color, EmissionEnergyMultiplier = emission ? 2.4f : 1f
     };
 

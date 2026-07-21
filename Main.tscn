@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource path="res://Scripts/Main.cs" type="Script" id="1"]
 [ext_resource path="res://Scripts/HexPlanet.cs" type="Script" id="2"]
@@ -7,13 +7,29 @@
 [ext_resource path="res://Scripts/MobManager.cs" type="Script" id="5"]
 [ext_resource path="res://Scripts/StarlingFlock.cs" type="Script" id="6"]
 [ext_resource path="res://Scripts/EcosystemManager.cs" type="Script" id="7"]
+[ext_resource path="res://Scripts/PauseMenu.cs" type="Script" id="8"]
+[ext_resource path="res://Scripts/ChatConsole.cs" type="Script" id="9"]
+[ext_resource path="res://Scripts/NightMonsterManager.cs" type="Script" id="10"]
+[ext_resource path="res://Scripts/HotbarInventory.cs" type="Script" id="11"]
+[ext_resource path="res://Scripts/NatureSystem.cs" type="Script" id="12"]
+[ext_resource path="res://Scripts/SoundManager.cs" type="Script" id="13"]
+[ext_resource path="res://Scripts/SurvivalSystem.cs" type="Script" id="14"]
+
+[sub_resource type="SphereMesh" id="EyeMesh"]
+radius = 0.07
+height = 0.14
+radial_segments = 8
+rings = 4
+
+[sub_resource type="StandardMaterial3D" id="EyeMaterial"]
+albedo_color = Color(0.03, 0.03, 0.04, 1)
 
 [sub_resource type="CapsuleShape3D" id="CapsulePlayer"]
-radius = 0.28
+radius = 0.21
 height = 1.5
 
 [sub_resource type="CapsuleMesh" id="CapsulePlayerMesh"]
-radius = 0.28
+radius = 0.21
 height = 1.5
 radial_segments = 12
 rings = 4
@@ -82,6 +98,16 @@ visible = false
 mesh = SubResource("CapsulePlayerMesh")
 material_override = SubResource("PlayerMaterial")
 
+[node name="EyeLeft" type="MeshInstance3D" parent="Player/BodyMesh"]
+position = Vector3(-0.11, 0.28, -0.25)
+mesh = SubResource("EyeMesh")
+material_override = SubResource("EyeMaterial")
+
+[node name="EyeRight" type="MeshInstance3D" parent="Player/BodyMesh"]
+position = Vector3(0.11, 0.28, -0.25)
+mesh = SubResource("EyeMesh")
+material_override = SubResource("EyeMaterial")
+
 [node name="Pivot" type="Node3D" parent="Player"]
 position = Vector3(0, 0.68, 0)
 
@@ -136,8 +162,17 @@ material_override = SubResource("MoonMaterial")
 [node name="MusicManager" type="Node" parent="."]
 script = ExtResource("4")
 
+[node name="SoundManager" type="Node" parent="."]
+script = ExtResource("13")
+
+[node name="SurvivalSystem" type="Node3D" parent="."]
+script = ExtResource("14")
+
 [node name="MobManager" type="Node3D" parent="."]
 script = ExtResource("5")
+
+[node name="NatureSystem" type="Node3D" parent="."]
+script = ExtResource("12")
 
 [node name="StarlingFlock" type="Node3D" parent="."]
 script = ExtResource("6")
@@ -145,21 +180,24 @@ script = ExtResource("6")
 [node name="EcosystemManager" type="Node3D" parent="."]
 script = ExtResource("7")
 
+[node name="NightMonsterManager" type="Node3D" parent="."]
+script = ExtResource("10")
+
 [node name="HUD" type="CanvasLayer" parent="."]
 
 [node name="Panel" type="ColorRect" parent="HUD"]
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 410.0
-offset_bottom = 100.0
+offset_bottom = 120.0
 color = Color(0.02, 0.03, 0.06, 0.78)
 
 [node name="Label" type="Label" parent="HUD/Panel"]
 offset_left = 14.0
 offset_top = 10.0
 offset_right = 390.0
-offset_bottom = 75.0
-text = "HexaSpherical Sandbox — Alpha 0.0.3\nF5: third-person view   G: flashlight\nF10: save and quit"
+offset_bottom = 98.0
+text = "HexaSpherical Sandbox — Alpha Indev\nF5: FPS / TPS / selfie   G: flashlight\nEsc: pause and settings   F10: save and quit"
 
 [node name="Crosshair" type="Label" parent="HUD"]
 anchors_preset = 8
@@ -200,9 +238,9 @@ anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
 offset_left = -90.0
-offset_top = -58.0
+offset_top = -108.0
 offset_right = 90.0
-offset_bottom = -26.0
+offset_bottom = -76.0
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.65, 0.9, 1, 1)
@@ -223,6 +261,42 @@ theme_override_colors/font_color = Color(0.95, 0.25, 0.22, 1)
 theme_override_font_sizes/font_size = 18
 text = "Health: 100 / 100"
 
+[node name="HotbarLabel" type="Label" parent="HUD"]
+visible = false
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -145.0
+offset_top = -64.0
+offset_right = 145.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(1, 0.92, 0.68, 1)
+theme_override_font_sizes/font_size = 20
+text = "[1] HEX BLOCK  ×64"
+horizontal_alignment = 1
+
+[node name="DeathLabel" type="Label" parent="HUD"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -60.0
+offset_right = 260.0
+offset_bottom = 60.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.9, 0.08, 0.06, 1)
+theme_override_font_sizes/font_size = 42
+text = "YOU DIED\nRespawning..."
+horizontal_alignment = 1
+
 [node name="RareEventLabel" type="Label" parent="HUD"]
 visible = false
 anchors_preset = 10
@@ -234,3 +308,157 @@ theme_override_colors/font_color = Color(1, 0.82, 0.18, 1)
 theme_override_font_sizes/font_size = 27
 text = "EXTREMELY RARE EVENT"
 horizontal_alignment = 1
+
+[node name="PauseMenu" type="CanvasLayer" parent="."]
+process_mode = 3
+layer = 20
+script = ExtResource("8")
+
+[node name="Overlay" type="Control" parent="PauseMenu"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Dim" type="ColorRect" parent="PauseMenu/Overlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.01, 0.015, 0.025, 0.82)
+
+[node name="Center" type="CenterContainer" parent="PauseMenu/Overlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="PauseMenu/Overlay/Center"]
+custom_minimum_size = Vector2(460, 300)
+layout_mode = 2
+
+[node name="Layout" type="VBoxContainer" parent="PauseMenu/Overlay/Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="PauseMenu/Overlay/Center/Panel/Layout"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "GAME PAUSED"
+horizontal_alignment = 1
+
+[node name="RenderLabel" type="Label" parent="PauseMenu/Overlay/Center/Panel/Layout"]
+layout_mode = 2
+text = "Render distance"
+
+[node name="RenderDistance" type="HSlider" parent="PauseMenu/Overlay/Center/Panel/Layout"]
+layout_mode = 2
+min_value = 12.0
+max_value = 96.0
+step = 4.0
+value = 20.0
+
+[node name="DistanceValue" type="Label" parent="PauseMenu/Overlay/Center/Panel/Layout"]
+layout_mode = 2
+text = "20 metres"
+horizontal_alignment = 1
+
+[node name="Resume" type="Button" parent="PauseMenu/Overlay/Center/Panel/Layout"]
+layout_mode = 2
+text = "Resume"
+
+[node name="SaveQuit" type="Button" parent="PauseMenu/Overlay/Center/Panel/Layout"]
+layout_mode = 2
+text = "Save and quit"
+
+[node name="ChatConsole" type="CanvasLayer" parent="."]
+layer = 15
+script = ExtResource("9")
+
+[node name="History" type="Label" parent="ChatConsole"]
+visible = false
+offset_left = 18.0
+offset_top = 570.0
+offset_right = 850.0
+offset_bottom = 610.0
+theme_override_colors/font_color = Color(0.8, 0.95, 1, 1)
+text = "Command result"
+
+[node name="Input" type="LineEdit" parent="ChatConsole"]
+offset_left = 18.0
+offset_top = 630.0
+offset_right = 850.0
+offset_bottom = 675.0
+placeholder_text = "Chat or command..."
+
+[node name="InventoryUI" type="CanvasLayer" parent="."]
+layer = 14
+script = ExtResource("11")
+
+[node name="Hotbar" type="HBoxContainer" parent="InventoryUI"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -430.0
+offset_top = -82.0
+offset_right = 430.0
+offset_bottom = -18.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/separation = 3
+
+[node name="Inventory" type="Control" parent="InventoryUI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Dim" type="ColorRect" parent="InventoryUI/Inventory"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.01, 0.015, 0.025, 0.82)
+
+[node name="Center" type="CenterContainer" parent="InventoryUI/Inventory"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="InventoryUI/Inventory/Center"]
+custom_minimum_size = Vector2(680, 560)
+layout_mode = 2
+
+[node name="Layout" type="VBoxContainer" parent="InventoryUI/Inventory/Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="InventoryUI/Inventory/Center/Panel/Layout"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "INVENTORY AND 3 × 3 CRAFTING"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="InventoryUI/Inventory/Center/Panel/Layout"]
+layout_mode = 2
+text = "Creative: assign freely. Survival: click an owned item to place it in the crafting grid."
+horizontal_alignment = 1
+
+[node name="Grid" type="GridContainer" parent="InventoryUI/Inventory/Center/Panel/Layout"]
+layout_mode = 2
+columns = 9

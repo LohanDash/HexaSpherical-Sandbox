@@ -9,18 +9,16 @@ public partial class MusicManager : Node
 
     private readonly RandomNumberGenerator _random = new();
     private AudioStreamPlayer _audio = null!;
+    private Main _main = null!;
     private HexPlanet _planet = null!;
     private Node3D _player = null!;
     private Track _current;
     private Track _scheduled;
     private WorldMusicContext _context = WorldMusicContext.Surface;
-    private bool _inCave;
     private bool _deathMusic;
-    private bool _caveTrackTriggered;
+    private bool _threeAmChecked;
+    private bool _threeAmSilence;
     private double _playAt;
-    private double _checkCaveAt;
-    private double _caveRollStartsAt;
-    private double _nextCaveRollAt;
     private double _checkContextAt;
 
     private static readonly string[] Paths =
@@ -44,34 +42,21 @@ public partial class MusicManager : Node
         _audio.Finished += OnFinished;
         _planet = GetNode<HexPlanet>("../Planet");
         _player = GetNode<Node3D>("../Player");
+        _main = GetNode<Main>("..");
         Schedule(RandomSurfaceTrack(), true);
     }
 
     public override void _Process(double delta)
     {
         double now = Now();
-        if (now >= _checkContextAt && !_inCave && !_deathMusic)
+        if (now >= _checkContextAt && !_deathMusic && !_threeAmSilence)
         {
             _checkContextAt = now + 1.0;
             SetWorldContext(_planet.IsOcean(_player.GlobalPosition.Normalized())
                 ? WorldMusicContext.Ocean : WorldMusicContext.Surface);
         }
-        if (now >= _checkCaveAt)
-        {
-            _checkCaveAt = now + 0.25;
-            SetCaveState(_planet.HasCeiling(_player.GlobalPosition));
-        }
-        if (_inCave && !_deathMusic && !_caveTrackTriggered
-            && now >= _caveRollStartsAt && now >= _nextCaveRollAt)
-        {
-            _nextCaveRollAt = now + 1.0;
-            if (_random.Randf() < 0.01f)
-            {
-                _caveTrackTriggered = true;
-                Play(Track.Cave13);
-            }
-        }
-        if (!_deathMusic && !_inCave && !_audio.Playing && now >= _playAt)
+        UpdateThreeAmEvent();
+        if (!_deathMusic && !_threeAmSilence && !_audio.Playing && now >= _playAt)
             Play(_scheduled == Track.None ? ContextTrack() : _scheduled);
     }
 
@@ -80,34 +65,48 @@ public partial class MusicManager : Node
     {
         if (_context == context) return;
         _context = context;
-        if (_deathMusic || _inCave) return;
+        if (_deathMusic || _threeAmSilence) return;
         Stop();
         Schedule(ContextTrack(), true);
     }
 
-    // Cave rules never interrupt these future death tracks.
+    // The 03:00 event never interrupts these future death tracks.
     public void PlayDeathMusic(bool hardcore)
     {
         _deathMusic = true;
         Play(hardcore ? Track.Mellohi : Track.Chirp);
     }
 
-    private void SetCaveState(bool value)
+    public void ResumeWorldMusic()
     {
-        if (value == _inCave || _deathMusic) return;
-        _inCave = value;
+        _deathMusic = false;
+        _threeAmSilence = false;
         Stop();
-        if (value)
+        Schedule(ContextTrack(), true);
+    }
+
+    private void UpdateThreeAmEvent()
+    {
+        float hour = _main.LocalHour;
+        if (hour >= 3f && hour < 4f && !_threeAmChecked)
         {
-            _playAt = double.PositiveInfinity;
-            _caveTrackTriggered = false;
-            _caveRollStartsAt = Now() + _random.RandfRange(5.0f, 10.0f);
-            _nextCaveRollAt = _caveRollStartsAt;
+            _threeAmChecked = true;
+            if (!_deathMusic && _random.Randf() < 0.03f)
+            {
+                Stop();
+                _threeAmSilence = true;
+                Play(Track.Cave13);
+            }
         }
-        else
+        // Dawn ends the exceptional silence and arms the event for the next night.
+        if (hour >= 6f && hour < 18f)
         {
-            _caveTrackTriggered = false;
-            Schedule(RandomSurfaceTrack(), true);
+            if (_threeAmSilence)
+            {
+                _threeAmSilence = false;
+                Schedule(ContextTrack(), true);
+            }
+            _threeAmChecked = false;
         }
     }
 
@@ -118,10 +117,10 @@ public partial class MusicManager : Node
         if (_deathMusic)
         {
             _deathMusic = false;
-            if (!_inCave) Schedule(ContextTrack(), true);
+            if (!_threeAmSilence) Schedule(ContextTrack(), true);
             return;
         }
-        if (_inCave) return;
+        if (_threeAmSilence) return;
         if (_context != WorldMusicContext.Surface) { Schedule(ContextTrack(), true); return; }
 
         if (finished == Track.Mice)
@@ -155,7 +154,7 @@ public partial class MusicManager : Node
         {
             GD.PushWarning($"Optional music file missing: {path}");
             _current = Track.None;
-            if (!_inCave && !_deathMusic) Schedule(ContextTrack(), true);
+            if (!_threeAmSilence && !_deathMusic) Schedule(ContextTrack(), true);
             return;
         }
         _scheduled = Track.None;

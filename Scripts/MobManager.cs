@@ -7,6 +7,8 @@ namespace HexaSphericalSandbox;
 
 public partial class MobManager : Node3D
 {
+    public int MobCount => _mobs.Count;
+    public bool AllMobLocomotionReady => _mobs.Values.All(mob => !IsInstanceValid(mob) || mob.HasActiveWalkAnimation);
     private const int MaximumMobs = 28;
     private const int MaximumMobsPerChunk = 5;
     private readonly Dictionary<string, AnimalMob> _mobs = [];
@@ -15,12 +17,14 @@ public partial class MobManager : Node3D
     private Camera3D _camera = null!;
     private float _existingChunkAttempt = 7f;
     private float _streamingCheck;
+    private SurvivalSystem _survival = null!;
 
     public override void _Ready()
     {
         _planet = GetNode<HexPlanet>("../Planet");
         _player = GetNode<Node3D>("../Player");
         _camera = GetNode<Camera3D>("../Player/Pivot/Camera3D");
+        _survival = GetNode<SurvivalSystem>("../SurvivalSystem");
         _planet.HighDetailChunkGenerated += OnNewHighDetailChunk;
 
         foreach (MobSaveData saved in GameSession.Current?.Mobs ?? [])
@@ -112,6 +116,36 @@ public partial class MobManager : Node3D
         AddChild(mob);
         mob.PlaceAt(position);
         _mobs[mob.MobId] = mob;
+    }
+
+    public bool SpawnEgg(string type, Vector3 direction)
+    {
+        if (_mobs.Count >= MaximumMobs) return false;
+        Spawn(type, _planet.PassiveMobSurfacePosition(direction));
+        return true;
+    }
+
+    public bool TryHit(Vector3 origin, Vector3 direction)
+    {
+        direction = direction.Normalized();
+        AnimalMob? target = null;
+        float nearest = 5.2f;
+        foreach (AnimalMob mob in _mobs.Values)
+        {
+            if (!IsInstanceValid(mob) || !mob.Visible) continue;
+            Vector3 toMob = mob.GlobalPosition + mob.GlobalPosition.Normalized() * 0.65f - origin;
+            float along = toMob.Dot(direction);
+            if (along < 0f || along >= nearest || (toMob - direction * along).Length() > 0.72f) continue;
+            nearest = along; target = mob;
+        }
+        if (target == null) return false;
+        if (!target.TakeDamage(1f)) return true;
+        Vector3 drop = target.GlobalPosition + target.GlobalPosition.Normalized() * 0.25f;
+        string item = target.MobType == "Cow" ? "Raw Beef" : "Raw Chicken";
+        _survival.SpawnPickup(item, target.MobType == "Cow" ? 3 : 1, drop);
+        _mobs.Remove(target.MobId);
+        target.BeginDeath();
+        return true;
     }
 
     public void Capture(WorldData world)

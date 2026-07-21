@@ -15,11 +15,28 @@ public partial class SaveSystemTest : Node
         WorldData? world = null;
         try
         {
-            world = WorldStore.Create("__save_torture_test__", "Creative");
+            world = WorldStore.Create("__save_torture_test__", "Creative", "PreIndev");
             string root = ProjectSettings.GlobalizePath($"user://worlds/{world.Id}");
             Assert(File.Exists(Path.Combine(root, "world.save")), "initial world.save missing");
+            Assert(world.GenerationPreset == "PreIndev", "generation preset was not stored");
 
             world.Health = 73f;
+            world.RenderDistance = 52f;
+            world.HexBlocks = 37;
+            world.HotbarItems[2] = "Purple Block";
+            world.HotbarCounts[2] = 19;
+            world.SelectedHotbarSlot = 2;
+            world.PlacedVoxelTypes[1234] = 5;
+            world.FoodPoisoned = true;
+            world.InventoryItems["Twig"] = 2;
+            world.InventorySlotItems[4] = "Pebble";
+            world.InventorySlotCounts[4] = 3;
+            world.CraftSlotItems[0] = "Stone Block";
+            world.CraftSlotCounts[0] = 1;
+            world.ToolDurability["Primitive Pickaxe"] = 2;
+            world.DestroyedTrees.Add(17);
+            world.CollectedTwigs.Add(26);
+            world.Campfires.Add([1f, 2f, 3f]);
             Assert(WorldStore.SaveAndFlush(world, TimeSpan.FromSeconds(8)), "generation 2 flush timed out");
             Assert(File.Exists(Path.Combine(root, "world.backup")), "world.backup missing after rotation");
 
@@ -30,14 +47,35 @@ public partial class SaveSystemTest : Node
             }
             world.Health = 99f;
             Assert(WorldStore.SaveAndFlush(world, TimeSpan.FromSeconds(8)), "concurrent flush timed out");
-            WorldData loaded = WorldStore.List().Single(item => item.Id == world.Id);
+            int worldFolderCount = Directory.GetDirectories(ProjectSettings.GlobalizePath("user://worlds")).Length;
+            WorldData loaded = WorldStore.Load(world.Id);
+            Assert(Directory.GetDirectories(ProjectSettings.GlobalizePath("user://worlds")).Length == worldFolderCount,
+                "loading a world unexpectedly created another world folder");
+            Assert(loaded.Id == world.Id && loaded.Seed == world.Seed,
+                "loading did not preserve immutable world identity");
             Assert(Math.Abs(loaded.Health - 99f) < 0.01f, "newest queued snapshot was not retained");
+            Assert(Math.Abs(loaded.RenderDistance - 52f) < 0.01f, "render distance was not retained");
+            Assert(loaded.HexBlocks == 37, "hotbar stack was not retained");
+            Assert(loaded.HotbarItems[2] == "Purple Block" && loaded.HotbarCounts[2] == 19
+                && loaded.SelectedHotbarSlot == 2, "nine-slot hotbar was not retained");
+            Assert(loaded.PlacedVoxelTypes.TryGetValue(1234, out int savedType) && savedType == 5,
+                "placed block type was not retained");
+            Assert(loaded.FoodPoisoned
+                && loaded.InventoryItems.TryGetValue("Twig", out int twigs) && twigs == 2,
+                "survival poisoning or inventory was not retained");
+            Assert(loaded.ToolDurability.TryGetValue("Primitive Pickaxe", out int pickaxeUses)
+                && loaded.InventorySlotItems[4] == "Pebble" && loaded.InventorySlotCounts[4] == 3
+                && loaded.CraftSlotItems[0] == "Stone Block" && loaded.CraftSlotCounts[0] == 1
+                && pickaxeUses == 2,
+                "slot inventory, crafting grid, or tool durability was not retained");
+            Assert(loaded.DestroyedTrees.Contains(17) && loaded.CollectedTwigs.Contains(26)
+                && loaded.Campfires.Count == 1, "survival world objects were not retained");
 
             // Destroy only the test world's primary candidate. Recovery must
             // select its valid backup rather than invent a new world/seed.
             int immutableSeed = world.Seed;
             File.WriteAllText(Path.Combine(root, "world.save"), "{ truncated");
-            loaded = WorldStore.List().Single(item => item.Id == world.Id);
+            loaded = WorldStore.Load(world.Id);
             Assert(loaded.Seed == immutableSeed, "recovery changed immutable seed");
 
             // Create two individually valid but different contents for one

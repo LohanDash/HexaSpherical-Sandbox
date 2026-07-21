@@ -162,6 +162,17 @@ public sealed class WorldSaveManager
         return worlds.Values.OrderByDescending(world => world.UpdatedUtc).ToList();
     }
 
+    public WorldData LoadWorld(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) throw new InvalidDataException("World id is empty.");
+        string folder = WorldFolder(id);
+        WorldData world = Recover(folder, true)
+            ?? throw new FileNotFoundException("No valid save was found for this world.", folder);
+        if (!string.Equals(world.Id, id, StringComparison.Ordinal))
+            throw new InvalidDataException("The save contains a different world id.");
+        return world;
+    }
+
     public void DeleteWorld(string id)
     {
         string folder = WorldFolder(id);
@@ -308,18 +319,32 @@ public sealed class WorldSaveManager
     private static WorldData Clone(WorldData source) => new()
     {
         SaveVersion = source.SaveVersion, SaveGeneration = source.SaveGeneration, Id = source.Id,
-        Name = source.Name, GameMode = source.GameMode, Seed = source.Seed,
+        Name = source.Name, GameMode = source.GameMode,
+        GenerationPreset = source.GenerationPreset, Seed = source.Seed,
         CreatedUtc = source.CreatedUtc, UpdatedUtc = source.UpdatedUtc,
         PlayerPosition = [.. source.PlayerPosition], RemovedVoxels = [.. source.RemovedVoxels],
         PlacedVoxels = [.. source.PlacedVoxels], DayAngle = source.DayAngle, Health = source.Health,
-        Quality = source.Quality, Mobs = source.Mobs.Select(mob => new MobSaveData
+        FoodPoisoned = source.FoodPoisoned,
+        Quality = source.Quality, RenderDistance = source.RenderDistance, HexBlocks = source.HexBlocks,
+        HotbarItems = [.. source.HotbarItems], HotbarCounts = [.. source.HotbarCounts],
+        InventorySlotItems = [.. source.InventorySlotItems], InventorySlotCounts = [.. source.InventorySlotCounts],
+        CraftSlotItems = [.. source.CraftSlotItems], CraftSlotCounts = [.. source.CraftSlotCounts],
+        ToolDurability = source.ToolDurability.ToDictionary(pair => pair.Key, pair => pair.Value),
+        SelectedHotbarSlot = source.SelectedHotbarSlot,
+        PlacedVoxelTypes = source.PlacedVoxelTypes.ToDictionary(pair => pair.Key, pair => pair.Value),
+        InventoryItems = source.InventoryItems.ToDictionary(pair => pair.Key, pair => pair.Value),
+        DestroyedTrees = [.. source.DestroyedTrees], CollectedTwigs = [.. source.CollectedTwigs],
+        Campfires = source.Campfires.Select(position => position.ToArray()).ToList(),
+        Mobs = source.Mobs.Select(mob => new MobSaveData
             { Id = mob.Id, Type = mob.Type, Position = [.. mob.Position] }).ToList(),
         WeatherEnabled = source.WeatherEnabled, InterpolationEnabled = source.InterpolationEnabled,
         PlantPopulation = source.PlantPopulation,
         InsectPopulation = source.InsectPopulation, BirdPopulation = source.BirdPopulation,
         PredatorPopulation = source.PredatorPopulation,
         BirdDangerZones = source.BirdDangerZones.Select(zone => zone.ToArray()).ToList(),
-        MigratingBirds = source.MigratingBirds, SimulationTicks = source.SimulationTicks,
+        MigratingBirds = source.MigratingBirds, StarlingCount = source.StarlingCount,
+        OccupiedTreeNests = [.. source.OccupiedTreeNests],
+        SimulationTicks = source.SimulationTicks,
         LastRealWorldUtc = source.LastRealWorldUtc
     };
 }

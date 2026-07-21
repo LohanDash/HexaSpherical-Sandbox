@@ -14,6 +14,8 @@ public sealed class WorldData
     public string Id { get; set; } = "";
     public string Name { get; set; } = "New World";
     public string GameMode { get; set; } = "Creative";
+    // Missing in legacy saves by design: deserialization keeps them Pre-Indev.
+    public string GenerationPreset { get; set; } = "PreIndev";
     public int Seed { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
@@ -22,7 +24,25 @@ public sealed class WorldData
     public List<long> PlacedVoxels { get; set; } = [];
     public float DayAngle { get; set; } = 1f;
     public float Health { get; set; } = 100f;
+    public bool FoodPoisoned { get; set; }
     public string Quality { get; set; } = "Low";
+    public float RenderDistance { get; set; }
+    public int HexBlocks { get; set; } = 64;
+    public string[] HotbarItems { get; set; } = new string[9];
+    public int[] HotbarCounts { get; set; } = new int[9];
+    // Added fields have empty defaults so old saves deserialize safely. The
+    // legacy InventoryItems dictionary is migrated into these real slots once.
+    public string[] InventorySlotItems { get; set; } = new string[27];
+    public int[] InventorySlotCounts { get; set; } = new int[27];
+    public string[] CraftSlotItems { get; set; } = new string[9];
+    public int[] CraftSlotCounts { get; set; } = new int[9];
+    public Dictionary<string, int> ToolDurability { get; set; } = [];
+    public int SelectedHotbarSlot { get; set; }
+    public Dictionary<long, int> PlacedVoxelTypes { get; set; } = [];
+    public Dictionary<string, int> InventoryItems { get; set; } = [];
+    public List<int> DestroyedTrees { get; set; } = [];
+    public List<int> CollectedTwigs { get; set; } = [];
+    public List<float[]> Campfires { get; set; } = [];
     public List<MobSaveData> Mobs { get; set; } = [];
     public bool WeatherEnabled { get; set; } = true;
     public bool InterpolationEnabled { get; set; } = true;
@@ -32,6 +52,8 @@ public sealed class WorldData
     public float PredatorPopulation { get; set; } = 0.35f;
     public List<float[]> BirdDangerZones { get; set; } = [];
     public int MigratingBirds { get; set; }
+    public int StarlingCount { get; set; } = 84;
+    public List<int> OccupiedTreeNests { get; set; } = [];
     public long SimulationTicks { get; set; }
     public DateTime LastRealWorldUtc { get; set; } = DateTime.UtcNow;
 }
@@ -53,12 +75,16 @@ public static class WorldStore
 {
     public static List<WorldData> List() => WorldSaveManager.Instance.ListWorlds();
 
-    public static WorldData Create(string name, string mode)
+    public static WorldData Load(string id) => WorldSaveManager.Instance.LoadWorld(id);
+
+    public static WorldData Create(string name, string mode, string generationPreset = "Indev")
     {
         var world = new WorldData {
             Id = Guid.NewGuid().ToString("N"), Name = string.IsNullOrWhiteSpace(name) ? "New World" : name.Trim(),
-            GameMode = mode, Seed = Random.Shared.Next(1, int.MaxValue), SaveVersion = 5
+            GameMode = mode, GenerationPreset = generationPreset,
+            Seed = Random.Shared.Next(1, int.MaxValue), SaveVersion = 6
         };
+        if (mode == "Survival") world.HexBlocks = 0;
         WorldSaveManager.Instance.Flush(world, TimeSpan.FromSeconds(8));
         return world;
     }

@@ -5,18 +5,21 @@ namespace HexaSphericalSandbox;
 
 public partial class StarlingFlock : Node3D
 {
-    private const int BirdCount = 84;
+    private const int MaxBirdCount = 100;
+    private const int InitialBirdCount = 84;
     private const int NeighbourCount = 7;
     private const float TickInterval = 0.05f;
-    private readonly Vector3[] _positions = new Vector3[BirdCount];
-    private readonly Vector3[] _previousPositions = new Vector3[BirdCount];
-    private readonly Vector3[] _velocities = new Vector3[BirdCount];
-    private readonly Vector3[] _nextVelocities = new Vector3[BirdCount];
+    private const float CruiseAltitude = 30f;
+    private readonly Vector3[] _positions = new Vector3[MaxBirdCount];
+    private readonly Vector3[] _previousPositions = new Vector3[MaxBirdCount];
+    private readonly Vector3[] _velocities = new Vector3[MaxBirdCount];
+    private readonly Vector3[] _nextVelocities = new Vector3[MaxBirdCount];
     private MultiMesh _multiMesh = null!;
     private Node3D _player = null!;
     private HexPlanet _planet = null!;
     private Main _main = null!;
-    private MeshInstance3D _hawk = null!;
+    private NatureSystem _nature = null!;
+    private Node3D _hawk = null!;
     private Vector3 _hawkPosition;
     private Vector3 _previousHawkPosition;
     private Vector3 _hawkVelocity;
@@ -30,29 +33,59 @@ public partial class StarlingFlock : Node3D
     private float _flockTime;
     private readonly float[] _nearestDistances = new float[NeighbourCount];
     private readonly int[] _nearest = new int[NeighbourCount];
+    private int _activeBirdCount = InitialBirdCount;
+    private int _nestTarget = -1;
+    private float _nestBuildTime;
+    private int _hawkTargetBird = -1;
+    public int BirdCount => _activeBirdCount;
+
+    public float MinimumTerrainClearance()
+    {
+        float minimum = float.MaxValue;
+        for (int bird = 0; bird < _activeBirdCount; bird++)
+        {
+            Vector3 direction = _positions[bird].Normalized();
+            minimum = Math.Min(minimum, _positions[bird].Length() - _planet.SurfaceRadius(direction));
+        }
+        return minimum;
+    }
 
     public override void _Ready()
     {
         _player = GetNode<Node3D>("../Player");
         _planet = GetNode<HexPlanet>("../Planet");
         _main = GetNode<Main>("..");
+        _nature = GetNode<NatureSystem>("../NatureSystem");
+        _activeBirdCount = Mathf.Clamp(GameSession.Current?.StarlingCount ?? InitialBirdCount, InitialBirdCount, MaxBirdCount);
         _planet.VoxelEdited += OnTerrainEdited;
         _multiMesh = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-            InstanceCount = BirdCount,
+            InstanceCount = MaxBirdCount,
             Mesh = CreateBirdMesh()
         };
-        AddChild(new MultiMeshInstance3D { Name = "Murmuration", Multimesh = _multiMesh });
-        _hawk = new MeshInstance3D { Name = "AerialPredator", Mesh = CreateBirdMesh(new Color(0.24f, 0.12f, 0.045f)) };
-        _hawk.Scale = Vector3.One * 0.95f;
+        AddChild(new MultiMeshInstance3D
+        {
+            Name = "Murmuration",
+            Multimesh = _multiMesh,
+            CustomAabb = new Aabb(new Vector3(-700f, -700f, -700f), new Vector3(1400f, 1400f, 1400f))
+        });
+        PackedScene hawkScene = GD.Load<PackedScene>("res://Models/Mobs/PolyPizza/hawk_sherkiz.glb");
+        _hawk = hawkScene.Instantiate<Node3D>();
+        _hawk.Name = "AerialPredator";
+        _hawk.Scale = Vector3.One * 0.35f;
         AddChild(_hawk);
+        if (_hawk.FindChild("AnimationPlayer", true, false) is AnimationPlayer animationPlayer)
+        {
+            animationPlayer.Play("metarig|Fly");
+            animationPlayer.SpeedScale = 1.35f;
+        }
 
         Vector3 up = _player.GlobalPosition.Normalized();
         Vector3 tangentA = up.Cross(Mathf.Abs(up.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
         Vector3 tangentB = up.Cross(tangentA).Normalized();
-        Vector3 centre = up * (_planet.Radius + 11f);
-        for (int i = 0; i < BirdCount; i++)
+        Vector3 centre = up * (_planet.SurfaceRadius(up) + CruiseAltitude);
+        for (int i = 0; i < _activeBirdCount; i++)
         {
             float angle = (float)GD.RandRange(0.0, Mathf.Tau);
             float radius = Mathf.Sqrt(GD.Randf()) * 7f;
@@ -74,7 +107,7 @@ public partial class StarlingFlock : Node3D
         int catchUpSteps = 0;
         while (_accumulator >= TickInterval && catchUpSteps++ < 3)
         {
-            Array.Copy(_positions, _previousPositions, BirdCount);
+            Array.Copy(_positions, _previousPositions, MaxBirdCount);
             _previousHawkPosition = _hawkPosition;
             _accumulator -= TickInterval;
             _flockTime += TickInterval;
@@ -92,13 +125,13 @@ public partial class StarlingFlock : Node3D
     {
         Vector3 playerUp = _player.GlobalPosition.Normalized();
         Vector3 flockCentre = Vector3.Zero;
-        foreach (Vector3 position in _positions) flockCentre += position;
-        flockCentre /= BirdCount;
+        for (int bird = 0; bird < _activeBirdCount; bird++) flockCentre += _positions[bird];
+        flockCentre /= _activeBirdCount;
 
         Vector3 orbitTangent = playerUp.Cross(Vector3.Up);
         if (orbitTangent.LengthSquared() < 0.01f) orbitTangent = playerUp.Cross(Vector3.Right);
         orbitTangent = orbitTangent.Normalized();
-        Vector3 dayCentre = playerUp * (_planet.Radius + 11.5f)
+        Vector3 dayCentre = playerUp * (_planet.SurfaceRadius(playerUp) + CruiseAltitude)
             + orbitTangent * Mathf.Sin(_flockTime * 0.22f) * 5f;
         Vector3 roostCentre = _roostDirection * (_planet.SurfaceRadius(_roostDirection) + 2.5f);
         WorldData? world = GameSession.Current;
@@ -113,25 +146,43 @@ public partial class StarlingFlock : Node3D
             }
         }
         float roosting = 1f - Mathf.SmoothStep(0.12f, 0.38f, _main.Daylight);
-        Vector3 desiredCentre = dayCentre.Lerp(roostCentre, roosting);
+        if (_nestTarget < 0 || !_nature.IsAvailable(_nestTarget))
+            _nestTarget = _nature.FindNearestAvailableTree(flockCentre, 180f);
+        Vector3 nestDestination = _nestTarget >= 0 ? _nature.NestPosition(_nestTarget) + _nature.NestPosition(_nestTarget).Normalized() * 1.2f : dayCentre;
+        Vector3 desiredCentre = roosting > 0.7f ? roostCentre : (_nestTarget >= 0 ? nestDestination : dayCentre);
 
         _hawkCycle += delta;
         bool hunting = Mathf.PosMod(_hawkCycle, 42f) < 17f && _main.Daylight > 0.18f;
-        Vector3 hawkTarget = hunting ? flockCentre : playerUp * (_planet.Radius + 24f) - orbitTangent * 30f;
-        Vector3 hawkDesired = (hawkTarget - _hawkPosition).Normalized() * (hunting ? 9.5f : 7f);
+        int attackedNest = hunting ? _nature.FindNearestNest(_hawkPosition) : -1;
+        if (hunting && attackedNest < 0 && (_hawkTargetBird < 0 || _hawkTargetBird >= _activeBirdCount))
+            _hawkTargetBird = NearestBirdTo(_hawkPosition);
+        if (!hunting) _hawkTargetBird = -1;
+        Vector3 hawkTarget = attackedNest >= 0 ? _nature.NestPosition(attackedNest)
+            : hunting && _hawkTargetBird >= 0 ? _positions[_hawkTargetBird]
+            : playerUp * (_planet.SurfaceRadius(playerUp) + CruiseAltitude + 8f) - orbitTangent * 30f;
+        Vector3 hawkUpNow = _hawkPosition.Normalized();
+        Vector3 hawkDisplacement = hawkTarget - _hawkPosition;
+        Vector3 hawkTangent = hawkDisplacement - hawkUpNow * hawkDisplacement.Dot(hawkUpNow);
+        float hawkMinimumRadius = _planet.SurfaceRadius(hawkUpNow) + (attackedNest >= 0 ? 4f : CruiseAltitude);
+        Vector3 hawkRadialCorrection = hawkUpNow * (hawkMinimumRadius - _hawkPosition.Length()) * 1.8f;
+        Vector3 hawkDesired = (hawkTangent + hawkRadialCorrection).Normalized() * (hunting ? 9.5f : 7f);
         _hawkVelocity = _hawkVelocity.MoveToward(hawkDesired, 4.2f * delta);
         _hawkPosition += _hawkVelocity * delta;
+        ClampAboveTerrain(ref _hawkPosition, ref _hawkVelocity, attackedNest >= 0 ? 3.2f : CruiseAltitude);
+        if (attackedNest >= 0 && _hawkPosition.DistanceTo(_nature.NestPosition(attackedNest)) < 1.1f)
+            _nature.DestroyNest(attackedNest);
 
-        for (int bird = 0; bird < BirdCount; bird++)
+        int caughtBird = -1;
+        for (int bird = 0; bird < _activeBirdCount; bird++)
         {
-            if (bird >= BirdCount - _birdsAway)
+            if (bird >= _activeBirdCount - _birdsAway)
                 continue;
             Array.Fill(_nearestDistances, float.MaxValue);
             Array.Fill(_nearest, -1);
 
-            for (int other = 0; other < BirdCount; other++)
+            for (int other = 0; other < _activeBirdCount; other++)
             {
-                if (other == bird || other >= BirdCount - _birdsAway) continue;
+                if (other == bird || other >= _activeBirdCount - _birdsAway) continue;
                 float distanceSquared = _positions[bird].DistanceSquaredTo(_positions[other]);
                 for (int slot = 0; slot < NeighbourCount; slot++)
                 {
@@ -166,7 +217,10 @@ public partial class StarlingFlock : Node3D
             Vector3 up = _positions[bird].Normalized();
             float wavePhase = _flockTime * 4.2f
                 + _positions[bird].Dot(orbitTangent) * 0.42f;
-            float desiredRadius = _planet.Radius + 11.5f + Mathf.Sin(wavePhase) * 2.1f;
+            float terrainRadius = _planet.SurfaceRadius(up);
+            float approachNest = _nestTarget >= 0 ? Mathf.Clamp(flockCentre.DistanceTo(nestDestination) / 24f, 0f, 1f) : 1f;
+            float flightAltitude = Mathf.Lerp(4f, CruiseAltitude, approachNest);
+            float desiredRadius = terrainRadius + flightAltitude + Mathf.Sin(wavePhase) * 2.4f;
             Vector3 altitudeWave = up * (desiredRadius - _positions[bird].Length());
             Vector3 collectiveTurn = up.Cross(_velocities[bird]).Normalized()
                 * Mathf.Sin(_flockTime * 0.85f) * 1.25f;
@@ -181,28 +235,33 @@ public partial class StarlingFlock : Node3D
             }
 
             Vector3 acceleration = alignment * 1.7f + cohesion * 0.48f
-                + separation * 2.4f + (desiredCentre - flockCentre) * 0.32f
+                + separation * 2.4f + (desiredCentre - flockCentre) * (_nestTarget >= 0 ? 2.4f : 0.32f)
                 + altitudeWave * 1.15f + collectiveTurn + predatorEscape;
             acceleration = acceleration.LimitLength(9f);
             Vector3 velocity = _velocities[bird] + acceleration * delta;
+            // Movement on a sphere must stay tangent. A direct Cartesian
+            // velocity follows a chord and inevitably cuts through terrain.
+            velocity -= up * velocity.Dot(up);
             _nextVelocities[bird] = velocity.Normalized() * Mathf.Clamp(velocity.Length(), 4.4f, 7.2f);
 
             if (hunting && hawkDistance < 0.42f && _eatCooldown <= 0f)
             {
-                // The population remains stable for now: an eaten bird is
-                // immediately reintroduced on the opposite side of the world.
-                Vector3 opposite = -_positions[bird].Normalized();
-                _positions[bird] = opposite * (_planet.Radius + 11f);
-                _nextVelocities[bird] = opposite.Cross(Vector3.Up).Normalized() * 5.5f;
+                caughtBird = bird;
                 _eatCooldown = 1.4f;
+                break;
             }
         }
 
-        for (int bird = 0; bird < BirdCount; bird++)
+        for (int bird = 0; bird < _activeBirdCount; bird++)
         {
             _velocities[bird] = _nextVelocities[bird];
             _positions[bird] += _velocities[bird] * delta;
+            float minimumFlightClearance = _nestTarget >= 0 ? 3.5f : CruiseAltitude - 3f;
+            ClampAboveTerrain(ref _positions[bird], ref _velocities[bird], minimumFlightClearance);
+            _nextVelocities[bird] = _velocities[bird];
         }
+        if (caughtBird >= 0) KillBird(caughtBird);
+        UpdateNesting(delta);
     }
 
     private void UpdateMigration(float delta)
@@ -218,10 +277,10 @@ public partial class StarlingFlock : Node3D
         if (_birdsAway == 0) return;
         _migrationDuration -= delta;
         if (_migrationDuration > 0f) return;
-        for (int bird = BirdCount - _birdsAway; bird < BirdCount; bird++)
+        for (int bird = _activeBirdCount - _birdsAway; bird < _activeBirdCount; bird++)
         {
             Vector3 opposite = -_player.GlobalPosition.Normalized();
-            _positions[bird] = opposite * (_planet.Radius + 11f)
+            _positions[bird] = opposite * (_planet.SurfaceRadius(opposite) + CruiseAltitude)
                 + opposite.Cross(Vector3.Up).Normalized() * (bird % 7);
             _velocities[bird] = opposite.Cross(Vector3.Right).Normalized() * 5.5f;
         }
@@ -240,11 +299,112 @@ public partial class StarlingFlock : Node3D
         _roostDirection = (_roostDirection + escape * 0.16f).Normalized();
     }
 
+    private void UpdateNesting(float delta)
+    {
+        if (_nestTarget < 0 || !_nature.IsAvailable(_nestTarget))
+        {
+            _nestBuildTime = 0f;
+            return;
+        }
+        Vector3 target = _nature.NestPosition(_nestTarget);
+        int arrivals = 0;
+        for (int bird = 0; bird < _activeBirdCount; bird++)
+            if (_positions[bird].DistanceSquaredTo(target) < 5.5f * 5.5f && ++arrivals >= 2) break;
+        if (arrivals < 2) { _nestBuildTime = 0f; return; }
+        _nestBuildTime += delta;
+        if (_nestBuildTime < 0.4f || !_nature.CreateNest(_nestTarget)) return;
+
+        int child;
+        if (_activeBirdCount < MaxBirdCount)
+            child = _activeBirdCount++;
+        else
+        {
+            // At the cap, recycle the bird farthest from the player. This is
+            // effectively the requested off-camera despawn plus one newborn.
+            child = 0;
+            float farthest = -1f;
+            for (int bird = 0; bird < _activeBirdCount; bird++)
+            {
+                float distance = _positions[bird].DistanceSquaredTo(_player.GlobalPosition);
+                if (distance > farthest) { farthest = distance; child = bird; }
+            }
+        }
+        Vector3 up = target.Normalized();
+        Vector3 tangent = up.Cross(Mathf.Abs(up.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
+        _positions[child] = target + up * 0.45f;
+        _previousPositions[child] = _positions[child];
+        _velocities[child] = tangent * 4.6f;
+        _nextVelocities[child] = _velocities[child];
+        if (GameSession.Current != null) GameSession.Current.StarlingCount = _activeBirdCount;
+        _nestTarget = -1;
+        _nestBuildTime = 0f;
+    }
+
+    private int NearestBirdTo(Vector3 position)
+    {
+        int nearest = -1;
+        float distance = float.MaxValue;
+        for (int bird = 0; bird < _activeBirdCount - _birdsAway; bird++)
+        {
+            float candidate = position.DistanceSquaredTo(_positions[bird]);
+            if (candidate >= distance) continue;
+            distance = candidate;
+            nearest = bird;
+        }
+        return nearest;
+    }
+
+    private void KillBird(int bird)
+    {
+        if (bird < 0 || bird >= _activeBirdCount) return;
+        int last = _activeBirdCount - 1;
+        _positions[bird] = _positions[last];
+        _previousPositions[bird] = _previousPositions[last];
+        _velocities[bird] = _velocities[last];
+        _nextVelocities[bird] = _nextVelocities[last];
+        _activeBirdCount = Math.Max(12, _activeBirdCount - 1);
+        _hawkTargetBird = -1;
+        SoundManager.Play(SoundKind.Hawk, -9f);
+        SoundManager.Play(SoundKind.Hit, -14f);
+        if (GameSession.Current != null) GameSession.Current.StarlingCount = _activeBirdCount;
+    }
+
+    public bool ValidateHawkCatch()
+    {
+        int before = _activeBirdCount;
+        if (before <= 12) return false;
+        KillBird(0);
+        return _activeBirdCount == before - 1;
+    }
+
+    public bool ValidateNestConstruction()
+    {
+        int tree = _nature.FindNearestAvailableTree(_player.GlobalPosition, 500f);
+        if (tree < 0) return false;
+        _nestTarget = tree;
+        Vector3 target = _nature.NestPosition(tree);
+        _positions[0] = target;
+        _positions[1] = target + target.Normalized() * 0.1f;
+        _previousPositions[0] = _positions[0];
+        _previousPositions[1] = _positions[1];
+        UpdateNesting(0.5f);
+        return _nature.HasNest(tree) && GameSession.Current?.OccupiedTreeNests.Contains(tree) == true;
+    }
+
+    private void ClampAboveTerrain(ref Vector3 position, ref Vector3 velocity, float clearance)
+    {
+        Vector3 up = position.Normalized();
+        float minimumRadius = _planet.SurfaceRadius(up) + clearance;
+        if (position.Length() < minimumRadius) position = up * minimumRadius;
+        float inwardSpeed = velocity.Dot(up);
+        if (inwardSpeed < 0f) velocity -= up * inwardSpeed;
+    }
+
     private void UpdateTransforms(float interpolation = 1f)
     {
-        for (int bird = 0; bird < BirdCount; bird++)
+        for (int bird = 0; bird < MaxBirdCount; bird++)
         {
-            if (bird >= BirdCount - _birdsAway)
+            if (bird >= _activeBirdCount || bird >= _activeBirdCount - _birdsAway)
             {
                 _multiMesh.SetInstanceTransform(bird,
                     new Transform3D(Basis.Identity.Scaled(Vector3.Zero), Vector3.Zero));
@@ -257,17 +417,20 @@ public partial class StarlingFlock : Node3D
             if (right.LengthSquared() < 0.01f) right = forward.Cross(Vector3.Up).Normalized();
             up = right.Cross(forward).Normalized();
             float flap = 0.72f + Mathf.Abs(Mathf.Sin(_flockTime * 13f + bird * 1.7f)) * 0.42f;
-            Basis basis = new Basis(right * flap, up, -forward).Scaled(Vector3.One * 0.32f);
+            Basis basis = new Basis(right * flap, up, -forward).Scaled(Vector3.One * 0.52f);
             _multiMesh.SetInstanceTransform(bird, new Transform3D(basis, renderedPosition));
         }
         Vector3 hawkForward = _hawkVelocity.Normalized();
         Vector3 renderedHawk = _previousHawkPosition.Lerp(_hawkPosition, interpolation);
         Vector3 hawkUp = renderedHawk.Normalized();
+        hawkForward = (hawkForward - hawkUp * hawkForward.Dot(hawkUp)).Normalized();
+        if (hawkForward.LengthSquared() < 0.01f) hawkForward = hawkUp.Cross(Vector3.Right).Normalized();
         Vector3 hawkRight = hawkForward.Cross(hawkUp).Normalized();
-        _hawk.GlobalTransform = new Transform3D(new Basis(hawkRight, hawkUp, -hawkForward), renderedHawk);
+        _hawk.GlobalTransform = new Transform3D(
+            new Basis(hawkRight, hawkUp, -hawkForward).Scaled(Vector3.One * 0.35f), renderedHawk);
     }
 
-    private static ArrayMesh CreateBirdMesh() => CreateBirdMesh(new Color(0.035f, 0.045f, 0.06f));
+    private static ArrayMesh CreateBirdMesh() => CreateBirdMesh(new Color(0.13f, 0.15f, 0.18f));
 
     private static ArrayMesh CreateBirdMesh(Color dark)
     {
@@ -281,7 +444,15 @@ public partial class StarlingFlock : Node3D
             new Vector3(0, -0.08f, 0.35f), dark);
         tool.GenerateNormals();
         ArrayMesh mesh = tool.Commit();
-        mesh.SurfaceSetMaterial(0, new StandardMaterial3D { AlbedoColor = dark, Roughness = 0.9f });
+        mesh.SurfaceSetMaterial(0, new StandardMaterial3D
+        {
+            AlbedoColor = dark,
+            Roughness = 0.9f,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            EmissionEnabled = true,
+            Emission = dark,
+            EmissionEnergyMultiplier = 0.32f
+        });
         return mesh;
     }
 
