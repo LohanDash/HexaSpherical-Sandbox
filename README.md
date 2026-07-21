@@ -1,9 +1,9 @@
-# HexaSpherical Sandbox — Alpha 0.0.2
+# HexaSpherical Sandbox — Alpha 0.0.3
 
 Premier prototype Godot 4 C# d'une planète procédurale sphérique pavée de cellules
 hexagonales et de 12 pentagones.
 
-La planète de l'Alpha 0.0.2 possède un rayon de 36 mètres et environ 10 000
+La planète de l'Alpha 0.0.3 possède un rayon de 36 mètres et environ 10 000
 cellules, générées progressivement chunk par chunk.
 
 Le terrain utilise un streaming sphérique autour du joueur : les 12 mètres les
