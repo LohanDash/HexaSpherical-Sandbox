@@ -1,0 +1,43 @@
+# Materiaux pour le poulet hexagonal
+
+newmtl chicken_body
+Ka 0.20 0.20 0.20
+Kd 0.96 0.88 0.45
+Ks 0.08 0.08 0.08
+Ns 20
+
+newmtl chicken_head
+Ka 0.20 0.20 0.20
+Kd 0.98 0.92 0.60
+Ks 0.08 0.08 0.08
+Ns 20
+
+newmtl chicken_beak
+Ka 0.20 0.20 0.20
+Kd 0.95 0.55 0.12
+Ks 0.10 0.10 0.10
+Ns 18
+
+newmtl chicken_wing
+Ka 0.20 0.20 0.20
+Kd 0.83 0.70 0.28
+Ks 0.06 0.06 0.06
+Ns 12
+
+newmtl chicken_comb
+Ka 0.20 0.20 0.20
+Kd 0.82 0.12 0.10
+Ks 0.10 0.10 0.10
+Ns 14
+
+newmtl chicken_tail
+Ka 0.20 0.20 0.20
+Kd 0.55 0.38 0.18
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl chicken_leg
+Ka 0.20 0.20 0.20
+Kd 0.88 0.56 0.16
+Ks 0.05 0.05 0.05
+Ns 10

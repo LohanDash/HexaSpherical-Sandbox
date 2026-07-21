@@ -1,0 +1,43 @@
+# Materiaux pour la vache hexagonale
+
+newmtl cow_white
+Ka 0.20 0.20 0.20
+Kd 0.96 0.96 0.94
+Ks 0.05 0.05 0.05
+Ns 12
+
+newmtl cow_spot
+Ka 0.12 0.12 0.12
+Kd 0.10 0.10 0.10
+Ks 0.02 0.02 0.02
+Ns 4
+
+newmtl cow_muzzle
+Ka 0.20 0.20 0.20
+Kd 0.95 0.76 0.78
+Ks 0.05 0.05 0.05
+Ns 10
+
+newmtl cow_leg
+Ka 0.15 0.15 0.15
+Kd 0.18 0.18 0.18
+Ks 0.03 0.03 0.03
+Ns 6
+
+newmtl cow_ear
+Ka 0.20 0.20 0.20
+Kd 0.84 0.66 0.68
+Ks 0.03 0.03 0.03
+Ns 8
+
+newmtl cow_horn
+Ka 0.20 0.20 0.20
+Kd 0.86 0.82 0.65
+Ks 0.04 0.04 0.04
+Ns 8
+
+newmtl cow_tail
+Ka 0.15 0.15 0.15
+Kd 0.15 0.15 0.15
+Ks 0.02 0.02 0.02
+Ns 4

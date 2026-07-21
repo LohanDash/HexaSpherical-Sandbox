@@ -1,0 +1,98 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource path="res://Scripts/MainMenu.cs" type="Script" id="1"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.015, 0.025, 0.06, 1)
+
+[node name="Title" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 32.0
+offset_bottom = 88.0
+grow_horizontal = 2
+theme_override_font_sizes/font_size = 34
+text = "HEXASPHERICAL SANDBOX"
+horizontal_alignment = 1
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 70.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(620, 620)
+layout_mode = 2
+
+[node name="Layout" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Header" type="Label" parent="Center/Panel/Layout"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "Tes mondes"
+
+[node name="Worlds" type="ItemList" parent="Center/Panel/Layout"]
+custom_minimum_size = Vector2(580, 210)
+layout_mode = 2
+
+[node name="Details" type="Label" parent="Center/Panel/Layout"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "Sélectionne un monde."
+
+[node name="Load" type="Button" parent="Center/Panel/Layout"]
+layout_mode = 2
+text = "Jouer au monde sélectionné"
+
+[node name="Delete" type="Button" parent="Center/Panel/Layout"]
+layout_mode = 2
+text = "Supprimer le monde sélectionné"
+
+[node name="Separator" type="HSeparator" parent="Center/Panel/Layout"]
+layout_mode = 2
+
+[node name="NewName" type="LineEdit" parent="Center/Panel/Layout"]
+layout_mode = 2
+placeholder_text = "Nom du nouveau monde"
+
+[node name="Mode" type="OptionButton" parent="Center/Panel/Layout"]
+layout_mode = 2
+
+[node name="Quality" type="OptionButton" parent="Center/Panel/Layout"]
+layout_mode = 2
+
+[node name="Weather" type="CheckButton" parent="Center/Panel/Layout"]
+layout_mode = 2
+button_pressed = true
+text = "Météo locale sphérique"
+
+[node name="Interpolation" type="CheckButton" parent="Center/Panel/Layout"]
+layout_mode = 2
+button_pressed = true
+text = "Interpolation fluide"
+
+[node name="Create" type="Button" parent="Center/Panel/Layout"]
+layout_mode = 2
+text = "Créer et jouer"

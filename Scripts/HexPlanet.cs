@@ -7,12 +7,14 @@ namespace HexaSphericalSandbox;
 
 public partial class HexPlanet : StaticBody3D
 {
+    [Signal] public delegate void HighDetailChunkGeneratedEventHandler(Vector3 direction);
+    [Signal] public delegate void VoxelEditedEventHandler(Vector3 direction);
     [Export] public float Radius { get; set; } = 36.0f;
     [Export(PropertyHint.Range, "1,6,1")] public int Subdivisions { get; set; } = 5;
     [Export] public int Seed { get; set; } = 73421;
     [Export] public float Relief { get; set; } = 2.8f;
     [Export(PropertyHint.Range, "0.0,0.18,0.01")] public float CellGap { get; set; } = 0.0f;
-    [Export(PropertyHint.Range, "0.5,4.0,0.1")] public float BlockHeight { get; set; } = 2.6f;
+    [Export(PropertyHint.Range, "0.5,4.0,0.1")] public float BlockHeight { get; set; } = 1.3f;
     [Export] public float HighDetailDistance { get; set; } = 12.0f;
     [Export] public float StreamingDistance { get; set; } = 26.0f;
 
@@ -24,6 +26,8 @@ public partial class HexPlanet : StaticBody3D
     private int[][] _cellNeighbors = [];
     private int[] _cellLevels = [];
     private readonly HashSet<long> _removedVoxels = [];
+    private readonly HashSet<long> _playerRemovedVoxels = [];
+    private readonly HashSet<long> _playerPlacedVoxels = [];
     private const int MinimumLayer = -4;
     private const int MaximumLayer = 10;
     private const int CellsPerChunk = 64;
@@ -31,6 +35,7 @@ public partial class HexPlanet : StaticBody3D
     private StandardMaterial3D _terrainMaterial = null!;
     private readonly Queue<(int Chunk, int Lod)> _pendingChunks = [];
     private readonly HashSet<int> _generatedChunks = [];
+    private readonly HashSet<int> _everGeneratedHighDetail = [];
     private readonly Dictionary<int, int> _chunkLods = [];
     private readonly HashSet<int> _dirtyChunks = [];
     private int[][] _chunkCells = [];
@@ -44,6 +49,16 @@ public partial class HexPlanet : StaticBody3D
 
     public override void _Ready()
     {
+        if (GameSession.Current != null)
+        {
+            Seed = GameSession.Current.Seed;
+            switch (GameSession.Current.Quality)
+            {
+                case "High": HighDetailDistance = 18f; StreamingDistance = 38f; break;
+                case "Balanced": HighDetailDistance = 12f; StreamingDistance = 26f; break;
+                default: HighDetailDistance = 9f; StreamingDistance = 20f; break;
+            }
+        }
         GenerateIcosphere();
         BuildHexPlanet();
         _streamingTarget = GetNode<Node3D>("../Player");
@@ -66,6 +81,8 @@ public partial class HexPlanet : StaticBody3D
             _dirtyChunks.Remove(chunk);
             _generatedChunks.Add(chunk);
             _chunkLods[chunk] = request.Lod;
+            if (request.Lod == 0 && _everGeneratedHighDetail.Add(chunk))
+                EmitSignal(SignalName.HighDetailChunkGenerated, _chunkDirections[chunk]);
             GenerationProgress = _generatedChunks.Count / (float)_chunkMeshes.Count;
             break; // One terrain chunk per rendered frame.
         }
@@ -77,6 +94,96 @@ public partial class HexPlanet : StaticBody3D
         for (int layer = _cellLevels[cell]; layer >= MinimumLayer; layer--)
             if (IsOccupied(cell, layer)) return Radius + layer * BlockHeight;
         return Radius + (MinimumLayer - 1) * BlockHeight;
+    }
+
+    public bool IsPassiveMobHabitat(Vector3 direction)
+    {
+        direction = direction.Normalized();
+        int cell = ClosestCell(direction);
+        int layer = _cellLevels[cell];
+        if (!IsOccupied(cell, layer)) return false;
+        float height = layer * BlockHeight;
+        float latitude = Mathf.Abs(direction.Y);
+        bool stone = height > 1.25f;
+        bool grass = height >= -0.45f && latitude <= 0.78f
+            && !(latitude < 0.25f && height < 0.35f);
+        return stone || grass;
+    }
+
+    public bool IsOcean(Vector3 direction)
+    {
+        int cell = ClosestCell(direction.Normalized());
+        return _cellLevels[cell] * BlockHeight < -0.45f;
+    }
+
+    public Vector3 PassiveMobSurfacePosition(Vector3 direction, float clearance = 0.08f)
+    {
+        direction = direction.Normalized();
+        return direction * (SurfaceRadius(direction) + clearance);
+    }
+
+    public int ChunkAt(Vector3 direction)
+    {
+        int cell = ClosestCell(direction.Normalized());
+        return _cellToChunk.Length > cell ? _cellToChunk[cell] : -1;
+    }
+
+    public bool IsChunkStreamed(int chunk)
+    {
+        return chunk >= 0 && chunk < _chunkMeshes.Count
+            && _generatedChunks.Contains(chunk)
+            && _chunkMeshes[chunk].Mesh != null;
+    }
+
+    public bool ResolvePassiveMobSurface(Vector3 direction, ref int cachedCell,
+        out Vector3 position, out int chunk)
+    {
+        direction = direction.Normalized();
+        cachedCell = ClosestCellNear(direction, cachedCell);
+        chunk = cachedCell >= 0 ? _cellToChunk[cachedCell] : -1;
+        if (cachedCell < 0 || !IsPassiveMobHabitatCell(cachedCell))
+        {
+            position = Vector3.Zero;
+            return false;
+        }
+        position = direction * (Radius + _cellLevels[cachedCell] * BlockHeight + 0.08f);
+        return true;
+    }
+
+    private bool IsPassiveMobHabitatCell(int cell)
+    {
+        int layer = _cellLevels[cell];
+        if (!IsOccupied(cell, layer)) return false;
+        float height = layer * BlockHeight;
+        float latitude = Mathf.Abs(_vertices[cell].Y);
+        bool stone = height > 1.25f;
+        bool grass = height >= -0.45f && latitude <= 0.78f
+            && !(latitude < 0.25f && height < 0.35f);
+        return stone || grass;
+    }
+
+    private int ClosestCellNear(Vector3 direction, int startCell)
+    {
+        if (startCell < 0 || startCell >= _vertices.Count) return ClosestCell(direction);
+        int current = startCell;
+        float currentDot = direction.Dot(_vertices[current]);
+        // A walking mob crosses adjacent cells, so hill-climbing through the
+        // local topology replaces a full scan of all ~10k planet cells.
+        for (int step = 0; step < 8; step++)
+        {
+            int best = current;
+            float bestDot = currentDot;
+            foreach (int neighbour in _cellNeighbors[current])
+            {
+                if (neighbour < 0) continue;
+                float dot = direction.Dot(_vertices[neighbour]);
+                if (dot > bestDot) { best = neighbour; bestDot = dot; }
+            }
+            if (best == current) break;
+            current = best;
+            currentDot = bestDot;
+        }
+        return current;
     }
 
     public float FloorRadius(Vector3 direction, float maximumTopRadius)
@@ -150,12 +257,18 @@ public partial class HexPlanet : StaticBody3D
         if (bestCell < 0) return false;
         if (levelDelta < 0)
         {
-            _removedVoxels.Add(VoxelKey(bestCell, bestLayer));
+            long key = VoxelKey(bestCell, bestLayer);
+            _removedVoxels.Add(key);
+            _playerRemovedVoxels.Add(key);
+            _playerPlacedVoxels.Remove(key);
         }
         else
         {
             int placementLayer = Math.Min(bestLayer + 1, MaximumLayer);
-            _removedVoxels.Remove(VoxelKey(bestCell, placementLayer));
+            long key = VoxelKey(bestCell, placementLayer);
+            _removedVoxels.Remove(key);
+            _playerRemovedVoxels.Remove(key);
+            _playerPlacedVoxels.Add(key);
             _cellLevels[bestCell] = Math.Max(_cellLevels[bestCell], placementLayer);
         }
         int editedChunk = _cellToChunk[bestCell];
@@ -175,6 +288,7 @@ public partial class HexPlanet : StaticBody3D
             int lod = _chunkLods.GetValueOrDefault(neighbourChunk, 0);
             _pendingChunks.Enqueue((neighbourChunk, lod));
         }
+        EmitSignal(SignalName.VoxelEdited, _vertices[bestCell]);
         return true;
     }
 
@@ -284,6 +398,7 @@ public partial class HexPlanet : StaticBody3D
             for (int cell = 0; cell < _vertices.Count; cell++)
                 _cellLevels[cell] = Mathf.RoundToInt(GeneratedHeightAt(_vertices[cell]) / BlockHeight);
             GenerateCaves();
+            ApplySavedVoxelChanges();
         }
 
         for (int cell = 0; cell < _vertices.Count; cell++)
@@ -559,6 +674,32 @@ public partial class HexPlanet : StaticBody3D
     private static long VoxelKey(int cell, int layer)
     {
         return ((long)cell << 32) | (uint)layer;
+    }
+
+    public void CaptureVoxelChanges(WorldData world)
+    {
+        world.RemovedVoxels = [.. _playerRemovedVoxels];
+        world.PlacedVoxels = [.. _playerPlacedVoxels];
+    }
+
+    private void ApplySavedVoxelChanges()
+    {
+        var world = GameSession.Current;
+        if (world == null) return;
+        foreach (long key in world.RemovedVoxels)
+        {
+            _removedVoxels.Add(key);
+            _playerRemovedVoxels.Add(key);
+        }
+        foreach (long key in world.PlacedVoxels)
+        {
+            int cell = (int)(key >> 32);
+            int layer = unchecked((int)(uint)key);
+            if (cell < 0 || cell >= _cellLevels.Length) continue;
+            _removedVoxels.Remove(key);
+            _playerPlacedVoxels.Add(key);
+            _cellLevels[cell] = Math.Max(_cellLevels[cell], layer);
+        }
     }
 
     private int ClosestCell(Vector3 direction)

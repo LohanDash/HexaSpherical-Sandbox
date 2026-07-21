@@ -21,6 +21,7 @@ public partial class MusicManager : Node
     private double _checkCaveAt;
     private double _caveRollStartsAt;
     private double _nextCaveRollAt;
+    private double _checkContextAt;
 
     private static readonly string[] Paths =
     [
@@ -49,6 +50,12 @@ public partial class MusicManager : Node
     public override void _Process(double delta)
     {
         double now = Now();
+        if (now >= _checkContextAt && !_inCave && !_deathMusic)
+        {
+            _checkContextAt = now + 1.0;
+            SetWorldContext(_planet.IsOcean(_player.GlobalPosition.Normalized())
+                ? WorldMusicContext.Ocean : WorldMusicContext.Surface);
+        }
         if (now >= _checkCaveAt)
         {
             _checkCaveAt = now + 0.25;

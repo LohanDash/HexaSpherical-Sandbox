@@ -1,9 +1,12 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource path="res://Scripts/Main.cs" type="Script" id="1"]
 [ext_resource path="res://Scripts/HexPlanet.cs" type="Script" id="2"]
 [ext_resource path="res://Scripts/SphericalPlayer.cs" type="Script" id="3"]
 [ext_resource path="res://Scripts/MusicManager.cs" type="Script" id="4"]
+[ext_resource path="res://Scripts/MobManager.cs" type="Script" id="5"]
+[ext_resource path="res://Scripts/StarlingFlock.cs" type="Script" id="6"]
+[ext_resource path="res://Scripts/EcosystemManager.cs" type="Script" id="7"]
 
 [sub_resource type="CapsuleShape3D" id="CapsulePlayer"]
 radius = 0.28
@@ -29,6 +32,32 @@ radial_segments = 12
 albedo_color = Color(0.08, 0.09, 0.11, 1)
 metallic = 0.65
 roughness = 0.3
+
+[sub_resource type="SphereMesh" id="SunSphere"]
+radius = 5.0
+height = 10.0
+radial_segments = 24
+rings = 12
+
+[sub_resource type="StandardMaterial3D" id="SunMaterial"]
+shading_mode = 0
+albedo_color = Color(1, 0.82, 0.26, 1)
+emission_enabled = true
+emission = Color(1, 0.58, 0.08, 1)
+emission_energy_multiplier = 4.0
+
+[sub_resource type="SphereMesh" id="MoonSphere"]
+radius = 3.8
+height = 7.6
+radial_segments = 20
+rings = 10
+
+[sub_resource type="StandardMaterial3D" id="MoonMaterial"]
+shading_mode = 0
+albedo_color = Color(0.78, 0.84, 0.95, 1)
+emission_enabled = true
+emission = Color(0.34, 0.43, 0.62, 1)
+emission_energy_multiplier = 1.3
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1")
@@ -92,10 +121,29 @@ light_color = Color(0.32, 0.46, 0.72, 1)
 light_energy = 0.0
 shadow_enabled = false
 
+[node name="SunBody" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+mesh = SubResource("SunSphere")
+material_override = SubResource("SunMaterial")
+
+[node name="MoonBody" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+mesh = SubResource("MoonSphere")
+material_override = SubResource("MoonMaterial")
+
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 
 [node name="MusicManager" type="Node" parent="."]
 script = ExtResource("4")
+
+[node name="MobManager" type="Node3D" parent="."]
+script = ExtResource("5")
+
+[node name="StarlingFlock" type="Node3D" parent="."]
+script = ExtResource("6")
+
+[node name="EcosystemManager" type="Node3D" parent="."]
+script = ExtResource("7")
 
 [node name="HUD" type="CanvasLayer" parent="."]
 
@@ -111,7 +159,7 @@ offset_left = 14.0
 offset_top = 10.0
 offset_right = 390.0
 offset_bottom = 75.0
-text = "HexaSpherical Sandbox — Alpha 0.0.2\nF5 : troisième personne   G : lampe torche\nDouble Espace : voler   Maj : descendre"
+text = "HexaSpherical Sandbox — Alpha 0.0.3\nF5 : troisième personne   G : lampe torche\nF10 : sauvegarder et quitter"
 
 [node name="Crosshair" type="Label" parent="HUD"]
 anchors_preset = 8
@@ -160,4 +208,29 @@ grow_vertical = 0
 theme_override_colors/font_color = Color(0.65, 0.9, 1, 1)
 theme_override_font_sizes/font_size = 18
 text = "MODE VOL ACTIF"
+horizontal_alignment = 1
+
+[node name="HealthLabel" type="Label" parent="HUD"]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_top = -48.0
+offset_right = 210.0
+offset_bottom = -18.0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.95, 0.25, 0.22, 1)
+theme_override_font_sizes/font_size = 18
+text = "Vie : 100 / 100"
+
+[node name="RareEventLabel" type="Label" parent="HUD"]
+visible = false
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 125.0
+offset_bottom = 175.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.18, 1)
+theme_override_font_sizes/font_size = 27
+text = "ÉVÉNEMENT RARISSIME"
 horizontal_alignment = 1

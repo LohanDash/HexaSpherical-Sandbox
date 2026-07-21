@@ -12,6 +12,8 @@ public partial class SphericalPlayer : CharacterBody3D
     [Export] public float GroundClearance { get; set; } = 0.78f;
     [Export] public float MaxStepHeight { get; set; } = 0.35f;
     [Export] public float BodyHeight { get; set; } = 1.5f;
+    [Export] public float BodyRadius { get; set; } = 0.28f;
+    public float Health { get; private set; } = 100f;
 
     private Node3D _pivot = null!;
     private Camera3D _camera = null!;
@@ -26,6 +28,8 @@ public partial class SphericalPlayer : CharacterBody3D
     private double _lastJumpTapAt = -10.0;
     private float _flashlightProbeCooldown;
     private Label _flightLabel = null!;
+    private Label _healthLabel = null!;
+    private MusicManager _music = null!;
 
     public override void _Ready()
     {
@@ -35,10 +39,30 @@ public partial class SphericalPlayer : CharacterBody3D
         _flashlight = GetNode<SpotLight3D>("Pivot/FlashlightRig/Flashlight");
         _flashlightModel = GetNode<MeshInstance3D>("Pivot/FlashlightRig/FlashlightModel");
         _flightLabel = GetNode<Label>("../HUD/FlightLabel");
+        _healthLabel = GetNode<Label>("../HUD/HealthLabel");
+        _music = GetNode<MusicManager>("../MusicManager");
         _planet = GetNode<HexPlanet>("../Planet");
-        GlobalPosition = Vector3.Up * (_planet.Radius + _planet.Relief + 3.5f);
+        Health = Mathf.Clamp(GameSession.Current?.Health ?? 100f, 1f, 100f);
+        WorldData? world = GameSession.Current;
+        float[] savedPosition = world?.PlayerPosition ?? [];
+        bool positionIsCurrent = world?.SaveVersion >= 5 && savedPosition.Length == 3;
+        Vector3 saved = positionIsCurrent
+            ? new Vector3(savedPosition[0], savedPosition[1], savedPosition[2]) : Vector3.Zero;
+        Vector3 savedDirection = saved.LengthSquared() > 1f ? saved.Normalized() : Vector3.Up;
+        float savedFeetRadius = saved.Length() - GroundClearance;
+        bool savedPositionHasRoom = positionIsCurrent && saved.LengthSquared() > 1f
+            && _planet.HasRoom(savedDirection, savedFeetRadius, BodyHeight);
+        GlobalPosition = savedPositionHasRoom
+            ? saved
+            : savedDirection * (_planet.SurfaceRadius(savedDirection) + GroundClearance + 1.2f);
+        if (world != null && (world.SaveVersion < 5 || !savedPositionHasRoom))
+        {
+            world.SaveVersion = 5;
+            world.PlayerPosition = [GlobalPosition.X, GlobalPosition.Y, GlobalPosition.Z];
+        }
         Input.MouseMode = Input.MouseModeEnum.Captured;
         AlignToPlanet(Vector3.Up);
+        UpdateHealthLabel();
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -48,6 +72,7 @@ public partial class SphericalPlayer : CharacterBody3D
             double now = Time.GetTicksMsec() / 1000.0;
             if (now - _lastJumpTapAt <= 0.32)
             {
+                if (!GameSession.IsCreative) { _lastJumpTapAt = -10.0; return; }
                 _flying = !_flying;
                 Velocity = Vector3.Zero;
                 _flightLabel.Visible = _flying;
@@ -152,12 +177,16 @@ public partial class SphericalPlayer : CharacterBody3D
         float floorRadius = _planet.FloorRadius(direction, feetRadius + MaxStepHeight);
         float minimumRadius = floorRadius + GroundClearance;
         float currentRadius = GlobalPosition.Length();
+        bool wasGrounded = _surfaceGrounded;
         _surfaceGrounded = currentRadius <= minimumRadius + 0.12f;
+
+        float inwardSpeed = Velocity.Dot(direction);
+        if (_surfaceGrounded && !wasGrounded && inwardSpeed < -12.5f && !GameSession.IsCreative)
+            ApplyDamage((Mathf.Abs(inwardSpeed) - 12.5f) * 7.0f);
 
         if (currentRadius >= minimumRadius) return;
 
         GlobalPosition = direction * minimumRadius;
-        float inwardSpeed = Velocity.Dot(direction);
         if (inwardSpeed < 0.0f)
             Velocity -= direction * inwardSpeed;
     }
@@ -175,7 +204,17 @@ public partial class SphericalPlayer : CharacterBody3D
         // A taller neighbouring column behaves like a wall. It can only be
         // crossed once a jump has lifted the player's feet above its top.
         float feetRadius = GlobalPosition.Length() - GroundClearance;
-        bool noBodyRoom = !_planet.HasRoom(candidateDirection, feetRadius, BodyHeight);
+        Vector3 right = GlobalBasis.X * BodyRadius;
+        Vector3 forward = -GlobalBasis.Z * BodyRadius;
+        Vector3[] bodySamples = [candidate, candidate + right, candidate - right,
+            candidate + forward, candidate - forward];
+        bool noBodyRoom = false;
+        foreach (Vector3 sample in bodySamples)
+        {
+            if (_planet.HasRoom(sample.Normalized(), feetRadius, BodyHeight)) continue;
+            noBodyRoom = true;
+            break;
+        }
         bool blockedByColumn = noBodyRoom || (candidateSurface > currentSurface + MaxStepHeight
                             && feetRadius < candidateSurface);
 
@@ -185,6 +224,24 @@ public partial class SphericalPlayer : CharacterBody3D
             Velocity -= tangentVelocity;
 
         GlobalPosition += currentDirection * radialVelocity.Dot(currentDirection) * delta;
+    }
+
+    private void ApplyDamage(float amount)
+    {
+        Health = Mathf.Max(0f, Health - amount);
+        UpdateHealthLabel();
+        if (Health > 0f) return;
+        _music.PlayDeathMusic(false);
+        Health = 100f;
+        Velocity = Vector3.Zero;
+        GlobalPosition = Vector3.Up * (_planet.SurfaceRadius(Vector3.Up) + GroundClearance + 1.2f);
+        UpdateHealthLabel();
+    }
+
+    private void UpdateHealthLabel()
+    {
+        _healthLabel.Visible = !GameSession.IsCreative;
+        _healthLabel.Text = $"Vie : {Mathf.CeilToInt(Health)} / 100";
     }
 
     private void UpdateFlashlight(float delta)
