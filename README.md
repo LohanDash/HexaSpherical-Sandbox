@@ -27,7 +27,7 @@ Windows session.
 - ZQSD or WASD: move
 - Mouse: FPS camera
 - Space: jump
-- Escape: release or capture the mouse
+- Escape: open or close the quick settings menu to quit the game, change the render distance and more in futur updates
 - Left click: break the targeted block
 - Right click: place a block on the targeted cell
 - F5: cycle FPS → rear TPS → selfie view
