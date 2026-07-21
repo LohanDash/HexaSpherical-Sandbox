@@ -4,7 +4,7 @@ An early Godot 4 C# prototype featuring a procedurally generated spherical plane
 tiled with hexagonal cells and 12 structural pentagons.
 
 New Alpha Indev worlds use a planet with a radius of 288 metres eight times the
-PreIndev radius and approximately 164,000 cells. The original 36-metre planet
+PreIndev radius and approximately 164,000 cells. The original 36 metre planet
 remains available through the **PreIndev** generation preset. Existing worlds
 automatically keep their original generation and are never resized.
 
