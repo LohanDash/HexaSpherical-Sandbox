@@ -16,16 +16,25 @@ public partial class SphericalPlayer : CharacterBody3D
     private Node3D _pivot = null!;
     private Camera3D _camera = null!;
     private MeshInstance3D _bodyMesh = null!;
+    private SpotLight3D _flashlight = null!;
+    private MeshInstance3D _flashlightModel = null!;
     private HexPlanet _planet = null!;
     private float _pitch = -0.22f;
     private bool _surfaceGrounded;
     private bool _thirdPerson;
+    private bool _flying;
+    private double _lastJumpTapAt = -10.0;
+    private float _flashlightProbeCooldown;
+    private Label _flightLabel = null!;
 
     public override void _Ready()
     {
         _pivot = GetNode<Node3D>("Pivot");
         _camera = GetNode<Camera3D>("Pivot/Camera3D");
         _bodyMesh = GetNode<MeshInstance3D>("BodyMesh");
+        _flashlight = GetNode<SpotLight3D>("Pivot/FlashlightRig/Flashlight");
+        _flashlightModel = GetNode<MeshInstance3D>("Pivot/FlashlightRig/FlashlightModel");
+        _flightLabel = GetNode<Label>("../HUD/FlightLabel");
         _planet = GetNode<HexPlanet>("../Planet");
         GlobalPosition = Vector3.Up * (_planet.Radius + _planet.Relief + 3.5f);
         Input.MouseMode = Input.MouseModeEnum.Captured;
@@ -34,6 +43,26 @@ public partial class SphericalPlayer : CharacterBody3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (@event.IsActionPressed("jump") && @event is not InputEventKey { Echo: true })
+        {
+            double now = Time.GetTicksMsec() / 1000.0;
+            if (now - _lastJumpTapAt <= 0.32)
+            {
+                _flying = !_flying;
+                Velocity = Vector3.Zero;
+                _flightLabel.Visible = _flying;
+                _lastJumpTapAt = -10.0;
+            }
+            else _lastJumpTapAt = now;
+        }
+
+        if (@event is InputEventKey flashlightKey && flashlightKey.Pressed
+            && !flashlightKey.Echo && flashlightKey.Keycode == Key.G)
+        {
+            _flashlight.Visible = !_flashlight.Visible;
+            _flashlightModel.Visible = _flashlight.Visible;
+        }
+
         if (@event is InputEventKey viewKey && viewKey.Pressed && !viewKey.Echo && viewKey.Keycode == Key.F5)
         {
             _thirdPerson = !_thirdPerson;
@@ -48,7 +77,9 @@ public partial class SphericalPlayer : CharacterBody3D
         if (@event is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured)
         {
             RotateObjectLocal(Vector3.Up, -motion.Relative.X * MouseSensitivity);
-            _pitch = Mathf.Clamp(_pitch - motion.Relative.Y * MouseSensitivity, -1.15f, 0.65f);
+            // Almost the full vertical range: enough to mine directly below or
+            // above without allowing the camera basis to flip upside down.
+            _pitch = Mathf.Clamp(_pitch - motion.Relative.Y * MouseSensitivity, -1.562f, 1.562f);
             _pivot.Rotation = new Vector3(_pitch, 0, 0);
         }
 
@@ -71,6 +102,18 @@ public partial class SphericalPlayer : CharacterBody3D
 
         Vector2 input = Input.GetVector("move_left", "move_right", "move_forward", "move_back");
         Vector3 desired = (GlobalTransform.Basis.X * input.X + GlobalTransform.Basis.Z * input.Y).Normalized() * MoveSpeed;
+
+        if (_flying)
+        {
+            float vertical = (Input.IsActionPressed("jump") ? 1.0f : 0.0f)
+                           - (Input.IsPhysicalKeyPressed(Key.Shift) ? 1.0f : 0.0f);
+            Vector3 flightTarget = desired + up * vertical * MoveSpeed;
+            Velocity = Velocity.MoveToward(flightTarget, Acceleration * delta);
+            GlobalPosition += Velocity * delta;
+            UpdateFlashlight(delta);
+            return;
+        }
+
         Vector3 radialVelocity = up * Velocity.Dot(up);
         Vector3 tangentVelocity = Velocity - radialVelocity;
         tangentVelocity = tangentVelocity.MoveToward(desired, Acceleration * delta);
@@ -90,6 +133,7 @@ public partial class SphericalPlayer : CharacterBody3D
         UpDirection = up;
         MoveAcrossVoxelSurface(tangentVelocity, radialVelocity, delta);
         KeepAboveProceduralSurface();
+        UpdateFlashlight(delta);
     }
 
     private void AlignToPlanet(Vector3 up)
@@ -141,5 +185,18 @@ public partial class SphericalPlayer : CharacterBody3D
             Velocity -= tangentVelocity;
 
         GlobalPosition += currentDirection * radialVelocity.Dot(currentDirection) * delta;
+    }
+
+    private void UpdateFlashlight(float delta)
+    {
+        if (!_flashlight.Visible) return;
+        _flashlightProbeCooldown -= delta;
+        if (_flashlightProbeCooldown > 0f) return;
+        _flashlightProbeCooldown = 0.1f;
+
+        float hitDistance = _planet.GetRayHitDistance(
+            _flashlight.GlobalPosition, -_flashlight.GlobalBasis.Z, _flashlight.SpotRange);
+        float nearWallFactor = Mathf.SmoothStep(0.45f, 2.4f, hitDistance);
+        _flashlight.LightEnergy = Mathf.Lerp(0.3f, 5.0f, nearWallFactor);
     }
 }

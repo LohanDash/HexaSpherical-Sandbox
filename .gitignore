@@ -13,3 +13,5 @@ obj/
 .DS_Store
 Thumbs.db
 
+# Local licensed music assets are intentionally not redistributed.
+Music/
