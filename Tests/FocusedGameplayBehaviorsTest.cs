@@ -27,6 +27,9 @@ public partial class FocusedGameplayBehaviorsTest : Node
             var planet = main.GetNode<HexPlanet>("Planet");
             var mobs = main.GetNode<MobManager>("MobManager");
             var monsters = main.GetNode<NightMonsterManager>("NightMonsterManager");
+            if (!planet.TryGetInteractionTriangleSample(HexPlanet.VoxelFace.Top, false,
+                out Vector3 placementOrigin, out Vector3 placementDirection, out HexPlanet.VoxelRayHit placementHit))
+                throw new InvalidOperationException("No exact floor triangle was available for object placement.");
 
             if (!player.FlashlightUsesRightHandPivot)
                 throw new InvalidOperationException("Flashlight is not parented to the right-hand shoulder pivot.");
@@ -34,18 +37,18 @@ public partial class FocusedGameplayBehaviorsTest : Node
                 throw new InvalidOperationException("The selected item is not parented to the left-hand shoulder pivot.");
 
             inventory.AddItem("Campfire");
-            if (!inventory.SelectItemForValidation("Campfire") || !survival.UseSelected(Vector3.Up))
+            if (!inventory.SelectItemForValidation("Campfire") || !survival.UseSelected(placementOrigin, placementDirection))
                 throw new InvalidOperationException("Campfire placement failed.");
-            Vector3 objectPosition = planet.PassiveMobSurfacePosition(Vector3.Up, 0.05f);
+            Vector3 objectPosition = placementHit.Position.Normalized() * (placementHit.Position.Length() + 0.05f);
             int campfiresBefore = survival.CampfireCount;
             if (!survival.TryBreakPlacedObject(objectPosition + Vector3.Up * 3f, Vector3.Down)
                 || survival.CampfireCount != campfiresBefore - 1 || inventory.CountItem("Campfire") != 1)
                 throw new InvalidOperationException("Campfire was not recovered into the normal inventory.");
 
             inventory.AddItem("Bed");
-            if (!inventory.SelectItemForValidation("Bed") || !survival.UseSelected(Vector3.Up))
+            if (!inventory.SelectItemForValidation("Bed") || !survival.UseSelected(placementOrigin, placementDirection))
                 throw new InvalidOperationException("Bed placement failed.");
-            Vector3 bedPosition = planet.PassiveMobSurfacePosition(Vector3.Up, 0.08f);
+            Vector3 bedPosition = placementHit.Position.Normalized() * (placementHit.Position.Length() + 0.08f);
             if (!survival.TryInteract(bedPosition + Vector3.Up * 3f, Vector3.Down)
                 || world.RespawnBedPosition.Length != 3 || main.IsGlobalNight)
                 throw new InvalidOperationException("A daytime bed interaction did not only set spawn.");
@@ -103,7 +106,7 @@ public partial class FocusedGameplayBehaviorsTest : Node
 
             // Once placement has consumed the campfire, fill every slot. A
             // failed recovery must leave the world object intact and add none.
-            if (!inventory.SelectItemForValidation("Campfire") || !survival.UseSelected(Vector3.Up))
+            if (!inventory.SelectItemForValidation("Campfire") || !survival.UseSelected(placementOrigin, placementDirection))
                 throw new InvalidOperationException("Second campfire placement failed.");
             for (int index = 0; index < 80; index++) inventory.AddItem("Filler " + index);
             int fullCampfireCount = survival.CampfireCount;
@@ -117,10 +120,13 @@ public partial class FocusedGameplayBehaviorsTest : Node
                 throw new InvalidOperationException("Chicken spawn failed.");
             Vector3 mobAim = mobs.LastSpawnedMobAimPosition;
             Vector3 mobRayDirection = -mobAim.Normalized();
+            int chickenCallsBeforeHit = SoundManager.PlayCountForValidation(SoundKind.Chicken);
             if (!mobs.TryHit(mobAim - mobRayDirection, mobRayDirection)
                 || mobs.MobCount != mobCountBefore || mobs.DyingSceneNodeCount != 1
                 || survival.PickupCount < 1)
                 throw new InvalidOperationException("Passive mob death did not drop, deregister and enter cleanup.");
+            if (SoundManager.PlayCountForValidation(SoundKind.Chicken) != chickenCallsBeforeHit)
+                throw new InvalidOperationException("Hitting an animal incorrectly played the ambient chicken call.");
             await ToSignal(GetTree().CreateTimer(0.75f), SceneTreeTimer.SignalName.Timeout);
             if (mobs.DyingSceneNodeCount != 0)
                 throw new InvalidOperationException("Dead passive mob remained in the scene.");

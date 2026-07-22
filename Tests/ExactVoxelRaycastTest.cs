@@ -24,8 +24,20 @@ public partial class ExactVoxelRaycastTest : Node
             for (int i = 0; i < 18; i++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
             ValidateRay(planet, HexPlanet.VoxelFace.Top, false, "top-face centre");
+            int localTriangleTests = planet.LastRaycastTriangleTests;
+            int allDetailedTriangles = planet.LoadedDetailedTriangleCount;
+            if (allDetailedTriangles > 0 && localTriangleTests >= allDetailedTriangles)
+                throw new InvalidOperationException("Raycast chunk-cap culling inspected the entire detailed planet.");
             ValidateRay(planet, HexPlanet.VoxelFace.Top, true, "top-face edge");
             ValidateRay(planet, HexPlanet.VoxelFace.Bottom, true, "bottom-face edge");
+
+            if (!planet.TryGetInteractionTriangleSample(HexPlanet.VoxelFace.Top, false,
+                out Vector3 objectOrigin, out Vector3 objectDirection, out HexPlanet.VoxelRayHit objectFloor)
+                || !planet.TryGetSurfaceObjectPlacement(objectOrigin, objectDirection, out Vector3 objectPosition))
+                throw new InvalidOperationException("Surface object placement missed the exact floor triangle.");
+            Vector3 expectedObjectPosition = objectFloor.Position.Normalized() * (objectFloor.Position.Length() + 0.08f);
+            if (objectPosition.DistanceTo(expectedObjectPosition) > 0.001f)
+                throw new InvalidOperationException("Surface object placement escaped to the planet's outer roof surface.");
 
             if (!planet.TryGetInteractionTriangleSample(HexPlanet.VoxelFace.Side, true,
                 out Vector3 sideOrigin, out Vector3 sideDirection, out HexPlanet.VoxelRayHit sideExpected))
@@ -49,7 +61,7 @@ public partial class ExactVoxelRaycastTest : Node
                 throw new InvalidOperationException("Mining edited a voxel other than the first touched triangle.");
 
             GameSession.Current = null;
-            GD.Print("EXACT_VOXEL_RAYCAST_TEST: PASS");
+            GD.Print($"EXACT_VOXEL_RAYCAST_TEST: PASS (local triangles={localTriangleTests}/{allDetailedTriangles})");
             GetTree().Quit(0);
         }
         catch (Exception exception)
@@ -65,7 +77,9 @@ public partial class ExactVoxelRaycastTest : Node
         if (!planet.TryGetInteractionTriangleSample(face, nearEdge,
             out Vector3 origin, out Vector3 direction, out HexPlanet.VoxelRayHit expected))
             throw new InvalidOperationException($"No triangle was available for {label}.");
-        if (!planet.TryGetVoxelRayHit(origin, direction, out HexPlanet.VoxelRayHit actual))
+        // 4.2 m is the actual rear/selfie camera boom. It must remain exact
+        // while allowing spherical chunk-cap culling to reject farther chunks.
+        if (!planet.TryGetVoxelRayHit(origin, direction, out HexPlanet.VoxelRayHit actual, 4.2f))
             throw new InvalidOperationException($"Ray missed at {label}.");
         AssertSameVoxel(expected, actual, label);
         if (actual.Face != face)

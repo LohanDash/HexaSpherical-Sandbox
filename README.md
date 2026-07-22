@@ -1,19 +1,22 @@
-# HexaSpherical Sandbox — Alpha 0.0.4
+# HexaSpherical Sandbox — Alpha 0.0.5
 
 An early Godot 4 C# prototype featuring a procedurally generated spherical planet
 tiled with hexagonal cells and 12 structural pentagons.
 
-New Alpha Indev worlds use a planet with a radius of 288 metres eight times the
+New Normal worlds use a planet with a radius of 288 metres eight times the
 PreIndev radius and approximately 164,000 cells. The original 36 metre planet
-remains available through the PreIndev generation preset. Existing worlds
+remains available through the PreIndev generation preset. Existing Normal worlds
 automatically keep their original generation and are never resized.
 
 The terrain uses spherical streaming around the player. The nearest 12 metres
 display complete voxels and caves, the area up to 26 metres uses a simplified
 surface, and more distant chunks are unloaded.
 
+The measured planet pipeline, current limitations, PlanetSmith research, and the
+large-world roadmap are documented in [PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md).
+
 The underground contains interconnected chambers and tunnels. Rare natural shafts
-can connect the surface directly to the cave network. Alpha Indev caves preserve
+can connect the surface directly to the cave network. Normal caves preserve
 three solid layers beneath normal terrain and use much rarer surface entrances, so
 the cave field cannot flatten or perforate entire landscapes.
 
@@ -63,7 +66,10 @@ two nocturnal enemy types, and a persistent hex-block stack in the hotbar. Creat
 flight moves faster than walking. Use `/gamemode creative`, `/gamemode survival`,
 `/gamemode 1`, or `/gamemode 0` to change modes while playing.
 
-The nine-slot hotbar and 27-slot inventory start empty in new worlds. Stacks can
+The nine-slot hotbar and 27-slot inventory start empty in new worlds. Creative mode
+opens with separate **Inventory** and **Misc** tabs: Inventory keeps the same storage
+and 3 × 3 crafting interface as Survival, while Misc exposes the complete item catalogue.
+Switching game mode updates the E interface immediately. Stacks can
 be dragged between the hotbar, inventory, and persistent 3 × 3 crafting grid;
 right-click splits a stack. Creative mode provides a separate item catalogue.
 Placed block types, inventory slots, crafting slots, and tool durability persist

@@ -7,6 +7,7 @@ namespace HexaSphericalSandbox;
 public partial class NightMonsterManager : Node3D
 {
     private const float SimulationStep = 0.1f;
+    private const int MaximumSpawnEggMonsters = 48;
     public int EggMonsterCount => _monsters.Count(monster => monster.FromEgg);
     public int MonsterCount => _monsters.Count;
     public int MonsterSceneNodeCount => GetChildren().Count(child => child is AnimatableBody3D);
@@ -91,7 +92,9 @@ public partial class NightMonsterManager : Node3D
                 tangent = tangent.Normalized();
                 monster.Forward = tangent;
                 Vector3 direction = (monster.TargetPosition + tangent * monster.Speed * delta).Normalized();
-                if (_planet.ResolvePassiveMobSurface(direction, ref monster.Cell, out Vector3 surface, out _))
+                float bodyHeight = monster.Brute ? 1.55f : 0.72f;
+                if (_planet.ResolveMobSurfaceNear(direction, monster.TargetPosition.Length(), bodyHeight,
+                    ref monster.Cell, out Vector3 surface, out _))
                 {
                     monster.TargetPosition = surface + direction * 0.06f;
                     monster.Chunk = _planet.ChunkAt(direction);
@@ -144,9 +147,23 @@ public partial class NightMonsterManager : Node3D
 
     public bool SpawnEgg(string type, Vector3 direction)
     {
+        if (_monsters.Count >= MaximumSpawnEggMonsters) return false;
+        CreateMonster(direction, type.Contains("Brute"), true);
+        return true;
+    }
+
+    public bool SpawnEggAt(string type, Vector3 position)
+    {
+        if (_monsters.Count >= MaximumSpawnEggMonsters) return false;
+        CreateMonster(position.Normalized(), type.Contains("Brute"), true, position);
+        return true;
+    }
+
+    public bool SpawnNaturalForValidation(Vector3 direction)
+    {
         int chunk = _planet.ChunkAt(direction);
         if (CountInChunk(chunk) >= 3) return false;
-        CreateMonster(direction, type.Contains("Brute"), true);
+        CreateMonster(direction, false, false);
         return true;
     }
 
@@ -176,10 +193,10 @@ public partial class NightMonsterManager : Node3D
         return true;
     }
 
-    private void CreateMonster(Vector3 direction, bool brute, bool fromEgg)
+    private void CreateMonster(Vector3 direction, bool brute, bool fromEgg, Vector3? exactPosition = null)
     {
         int spawnChunk = _planet.ChunkAt(direction);
-        if (CountInChunk(spawnChunk) >= 3) return;
+        if (!fromEgg && CountInChunk(spawnChunk) >= 3) return;
         var body = new AnimatableBody3D { Name = brute ? "NightBrute" : "NightCrawler" };
         Node3D model = brute ? BuildBruteModel() : BuildCrawlerModel();
         body.AddChild(model);
@@ -190,7 +207,7 @@ public partial class NightMonsterManager : Node3D
             Position = Vector3.Up * (brute ? 0.76f : 0.38f)
         });
         AddChild(body);
-        Vector3 position = _planet.PassiveMobSurfacePosition(direction, 0.06f);
+        Vector3 position = exactPosition ?? _planet.PassiveMobSurfacePosition(direction, 0.06f);
         body.GlobalPosition = position;
 
         var monster = new Monster

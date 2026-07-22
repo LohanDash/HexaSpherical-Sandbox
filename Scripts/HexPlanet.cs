@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 namespace HexaSphericalSandbox;
@@ -25,6 +26,11 @@ public partial class HexPlanet : StaticBody3D
     private Vector3[][] _cellDirections = [];
     private int[][] _cellNeighbors = [];
     private int[] _cellLevels = [];
+    private int[] _caveEntranceFloors = [];
+    private ulong[] _caveMaskLow = [];
+    private ulong[] _caveMaskHigh = [];
+    private bool[] _caveCellGenerated = [];
+    private int _detailedCaveCellCount;
     private TerrainBiome[] _cellBiomes = [];
     private IndevBiomeTerrain? _biomeTerrain;
     private readonly HashSet<long> _removedVoxels = [];
@@ -33,6 +39,7 @@ public partial class HexPlanet : StaticBody3D
     private readonly Dictionary<long, int> _placedVoxelTypes = [];
     private const int MinimumLayer = -4;
     private const int MaximumLayer = 24;
+    private int EffectiveMaximumLayer => _biomeTerrain?.Version >= 3 ? 64 : MaximumLayer;
     private const int CellsPerChunk = 64;
     private readonly Dictionary<int, MeshInstance3D> _chunkMeshes = [];
     private readonly Dictionary<int, CollisionShape3D> _chunkCollisions = [];
@@ -57,6 +64,23 @@ public partial class HexPlanet : StaticBody3D
     public int LastBrokenBlockType { get; private set; }
     public int LastEditedCell { get; private set; } = -1;
     public int LastEditedLayer { get; private set; }
+    public double StartupMilliseconds { get; private set; }
+    public double TopologyMilliseconds { get; private set; }
+    public double IcosphereMilliseconds { get; private set; }
+    public double DualCellMilliseconds { get; private set; }
+    public double TerrainDataMilliseconds { get; private set; }
+    public double CaveDataMilliseconds { get; private set; }
+    public double ChunkIndexMilliseconds { get; private set; }
+    public int LastRaycastTriangleTests { get; private set; }
+    public int LoadedDetailedTriangleCount => _chunkHitTriangles.Values.Sum(triangles => triangles.Length);
+    public int LoadedDetailedChunkCount => _chunkLods.Count(pair => pair.Value == 0);
+    public int LoadedLodChunkCount => _chunkLods.Count(pair => pair.Value == 1);
+    public int GeneratedCellCount => _cellLevels.Length;
+    public int DetailedCaveCellCount => _detailedCaveCellCount;
+    public double AverageChunkBuildMilliseconds => _chunkBuildCount == 0 ? 0 : _chunkBuildTotalMilliseconds / _chunkBuildCount;
+    public double MaximumChunkBuildMilliseconds { get; private set; }
+    private double _chunkBuildTotalMilliseconds;
+    private int _chunkBuildCount;
     private float StoneHeightThreshold => Radius > 100f ? 18f : 1.25f;
 
     public enum VoxelFace { Top, Bottom, Side }
@@ -67,6 +91,7 @@ public partial class HexPlanet : StaticBody3D
 
     public override void _Ready()
     {
+        var startupWatch = Stopwatch.StartNew();
         if (GameSession.Current != null)
         {
             Seed = GameSession.Current.Seed;
@@ -74,8 +99,8 @@ public partial class HexPlanet : StaticBody3D
             Radius = indevPlanet ? 288f : 36f;
             Subdivisions = indevPlanet ? 7 : 5;
             Relief = indevPlanet ? 22f : 2.8f;
-            if (indevPlanet && GameSession.Current.TerrainGenerationVersion >= IndevBiomeTerrain.CurrentVersion)
-                _biomeTerrain = new IndevBiomeTerrain(Seed);
+            if (indevPlanet && GameSession.Current.TerrainGenerationVersion >= IndevBiomeTerrain.FirstVersion)
+                _biomeTerrain = new IndevBiomeTerrain(Seed, GameSession.Current.TerrainGenerationVersion);
             // Dual-cell borders are shared exactly. Any positive inset creates
             // visible cracks, so both presets deliberately remain gapless.
             CellGap = 0f;
@@ -88,17 +113,22 @@ public partial class HexPlanet : StaticBody3D
             if (GameSession.Current.RenderDistance > 0f)
                 ApplyRenderDistance(GameSession.Current.RenderDistance);
         }
+        var phaseWatch = Stopwatch.StartNew();
         GenerateIcosphere();
+        IcosphereMilliseconds = phaseWatch.Elapsed.TotalMilliseconds;
+        TopologyMilliseconds = IcosphereMilliseconds;
         BuildHexPlanet();
         _streamingTarget = GetNode<Node3D>("../Player");
-        RefreshStreaming(Vector3.Up);
+        RefreshStreaming(_streamingTarget.GlobalPosition);
+        startupWatch.Stop();
+        StartupMilliseconds = startupWatch.Elapsed.TotalMilliseconds;
     }
 
     public void SetRenderDistance(float distance)
     {
         ApplyRenderDistance(distance);
         if (IsInstanceValid(_streamingTarget))
-            RefreshStreaming(_streamingTarget.GlobalPosition.Normalized());
+            RefreshStreaming(_streamingTarget.GlobalPosition);
     }
 
     private void ApplyRenderDistance(float distance)
@@ -110,7 +140,7 @@ public partial class HexPlanet : StaticBody3D
     public override void _Process(double delta)
     {
         if (++_streamingFrame % 12 == 0)
-            RefreshStreaming(_streamingTarget.GlobalPosition.Normalized());
+            RefreshStreaming(_streamingTarget.GlobalPosition);
 
         while (_pendingChunks.Count > 0)
         {
@@ -118,7 +148,13 @@ public partial class HexPlanet : StaticBody3D
             bool dirty = _dirtyChunks.Contains(request.Chunk);
             if (!dirty && _chunkLods.TryGetValue(request.Chunk, out int currentLod) && currentLod == request.Lod)
                 continue;
+            var chunkWatch = Stopwatch.StartNew();
             RebuildChunk(request.Chunk, request.Lod);
+            chunkWatch.Stop();
+            double chunkMilliseconds = chunkWatch.Elapsed.TotalMilliseconds;
+            _chunkBuildTotalMilliseconds += chunkMilliseconds;
+            _chunkBuildCount++;
+            MaximumChunkBuildMilliseconds = Math.Max(MaximumChunkBuildMilliseconds, chunkMilliseconds);
             int chunk = request.Chunk;
             _dirtyChunks.Remove(chunk);
             _generatedChunks.Add(chunk);
@@ -213,6 +249,29 @@ public partial class HexPlanet : StaticBody3D
             return false;
         }
         position = direction * (Radius + _cellLevels[cachedCell] * BlockHeight + 0.08f);
+        return true;
+    }
+
+    public bool ResolveMobSurfaceNear(Vector3 direction, float referenceRadius,
+        float requiredHeight, ref int cachedCell, out Vector3 position, out int chunk)
+    {
+        direction = direction.Normalized();
+        cachedCell = ClosestCellNear(direction, cachedCell);
+        chunk = cachedCell >= 0 ? _cellToChunk[cachedCell] : -1;
+        if (cachedCell < 0)
+        {
+            position = Vector3.Zero;
+            return false;
+        }
+        // Select the nearest walkable floor around the mob's current height.
+        // A roof several layers above is intentionally excluded.
+        float floorRadius = FloorRadius(direction, referenceRadius + BlockHeight * 1.1f);
+        if (!HasRoom(direction, floorRadius, requiredHeight))
+        {
+            position = Vector3.Zero;
+            return false;
+        }
+        position = direction * (floorRadius + 0.08f);
         return true;
     }
 
@@ -314,7 +373,7 @@ public partial class HexPlanet : StaticBody3D
             if (hit.Face == VoxelFace.Top) placementLayer++;
             else if (hit.Face == VoxelFace.Bottom) placementLayer--;
             else if (hit.SideEdge >= 0) placementCell = _cellNeighbors[bestCell][hit.SideEdge];
-            if (placementCell < 0 || placementLayer < MinimumLayer || placementLayer > MaximumLayer
+            if (placementCell < 0 || placementLayer < MinimumLayer || placementLayer > EffectiveMaximumLayer
                 || IsOccupied(placementCell, placementLayer) || WouldOverlapPlayer(placementCell, placementLayer)) return false;
             editedCell = placementCell;
             editedLayer = placementLayer;
@@ -354,6 +413,22 @@ public partial class HexPlanet : StaticBody3D
             ? hit.Distance : maximumDistance;
     }
 
+    public bool TryGetSurfaceObjectPlacement(Vector3 rayOrigin, Vector3 rayDirection,
+        out Vector3 position, float clearance = 0.08f, float requiredHeight = 0.7f)
+    {
+        position = Vector3.Zero;
+        if (!TryGetVoxelRayHit(rayOrigin, rayDirection, out VoxelRayHit hit, 5.5f)
+            || hit.Face != VoxelFace.Top) return false;
+        Vector3 up = hit.Position.Normalized();
+        float floorRadius = hit.Position.Length();
+        if (!HasRoom(up, floorRadius, requiredHeight)) return false;
+        // Use the exact triangle hit, not PassiveMobSurfacePosition: the latter
+        // deliberately chooses the outermost surface and therefore placed beds
+        // on roofs whenever the player was inside a house.
+        position = up * (floorRadius + clearance);
+        return true;
+    }
+
     public bool TryGetTargetBlockType(Vector3 rayOrigin, Vector3 rayDirection, out int blockType, float maximumDistance = 9f)
     {
         if (!TryGetVoxelRayHit(rayOrigin, rayDirection, out VoxelRayHit hit, maximumDistance))
@@ -374,12 +449,22 @@ public partial class HexPlanet : StaticBody3D
         float bestFacing = float.NegativeInfinity;
         VoxelTriangle best = default;
         bool found = false;
+        LastRaycastTriangleTests = 0;
+        Vector3 originDirection = origin.Normalized();
+        float angularReach = Mathf.Asin(Mathf.Clamp(maximumDistance / Mathf.Max(1f, origin.Length()), 0f, 0.95f));
         foreach (int chunk in _generatedChunks)
         {
             if (_chunkLods.GetValueOrDefault(chunk, 1) != 0
                 || !_chunkHitTriangles.TryGetValue(chunk, out VoxelTriangle[]? triangles)) continue;
+            // Interaction rays are only a few metres long. Reject chunks whose
+            // spherical cap cannot overlap that ray before touching thousands
+            // of triangles. This is especially important for the TPS camera,
+            // which performs this query every physics frame.
+            float cap = _chunkAngularRadii[chunk] + angularReach + 0.015f;
+            if (originDirection.Dot(_chunkDirections[chunk]) < Mathf.Cos(cap)) continue;
             foreach (VoxelTriangle triangle in triangles)
             {
+                LastRaycastTriangleTests++;
                 if (!RayIntersectsTriangle(origin, direction, triangle, out float distance)
                     || distance > maximumDistance) continue;
                 float facing = -direction.Dot(triangle.Normal);
@@ -461,6 +546,12 @@ public partial class HexPlanet : StaticBody3D
     {
         _vertices.Clear();
         _faces.Clear();
+        int finalPower = 1 << (Subdivisions * 2); // 4^subdivisions
+        int finalVertexCount = 10 * finalPower + 2;
+        int finalFaceCount = 20 * finalPower;
+        _vertices.EnsureCapacity(finalVertexCount);
+        _faces.EnsureCapacity(finalFaceCount);
+        _midpoints.EnsureCapacity(finalFaceCount * 3 / 2);
         float t = (1.0f + Mathf.Sqrt(5.0f)) * 0.5f;
         Vector3[] initial =
         [
@@ -497,6 +588,10 @@ public partial class HexPlanet : StaticBody3D
             _faces.Clear();
             _faces.AddRange(next);
         }
+        // Midpoint lookup is generation-only. Do not retain its several-
+        // megabyte bucket array for the whole play session.
+        _midpoints.Clear();
+        _midpoints.TrimExcess();
     }
 
     private int Midpoint(int a, int b)
@@ -513,6 +608,7 @@ public partial class HexPlanet : StaticBody3D
 
     private void BuildHexPlanet()
     {
+        var phaseWatch = Stopwatch.StartNew();
         var adjacentFaces = Enumerable.Range(0, _vertices.Count)
             .Select(_ => new List<int>()).ToArray();
         var centers = new Vector3[_faces.Count];
@@ -525,6 +621,8 @@ public partial class HexPlanet : StaticBody3D
             adjacentFaces[face.B].Add(faceIndex);
             adjacentFaces[face.C].Add(faceIndex);
         }
+        double adjacencyMilliseconds = phaseWatch.Elapsed.TotalMilliseconds;
+        TopologyMilliseconds += adjacencyMilliseconds;
 
         _cellRings = new Vector3[_vertices.Count][];
         _cellDirections = new Vector3[_vertices.Count][];
@@ -532,37 +630,82 @@ public partial class HexPlanet : StaticBody3D
         _cellBiomes = new TerrainBiome[_vertices.Count];
         if (_cellLevels.Length != _vertices.Count)
         {
+            phaseWatch.Restart();
             _cellLevels = new int[_vertices.Count];
             for (int cell = 0; cell < _vertices.Count; cell++)
             {
                 TerrainBiomeSample sample = TerrainSampleAt(_vertices[cell]);
                 _cellBiomes[cell] = sample.Biome;
-                _cellLevels[cell] = Mathf.Clamp(Mathf.RoundToInt(sample.Height / BlockHeight), MinimumLayer, MaximumLayer);
+                _cellLevels[cell] = Mathf.Clamp(Mathf.RoundToInt(sample.Height / BlockHeight), MinimumLayer, EffectiveMaximumLayer);
             }
-            GenerateCaves();
+            TerrainDataMilliseconds = phaseWatch.Elapsed.TotalMilliseconds;
+            phaseWatch.Restart();
+            InitializeProceduralCaves();
+            CaveDataMilliseconds = phaseWatch.Elapsed.TotalMilliseconds;
             ApplySavedVoxelChanges();
         }
 
+        phaseWatch.Restart();
         for (int cell = 0; cell < _vertices.Count; cell++)
         {
             Vector3 normal = _vertices[cell];
-            Vector3 axisX = normal.Cross(Mathf.Abs(normal.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
-            Vector3 axisY = normal.Cross(axisX).Normalized();
-            int[] orderedFaces = adjacentFaces[cell]
-                .OrderBy(index => Mathf.Atan2(centers[index].Dot(axisY), centers[index].Dot(axisX)))
-                .ToArray();
-            var ring = orderedFaces.Select(index => centers[index]).ToArray();
+            int[] orderedFaces = OrderAdjacentFaces(cell, adjacentFaces[cell]);
+            var ring = new Vector3[orderedFaces.Length];
+            for (int corner = 0; corner < orderedFaces.Length; corner++)
+                ring[corner] = centers[orderedFaces[corner]];
 
             _cellRings[cell] = ring;
-            _cellDirections[cell] = ring
-                .Select(point => (point + normal * CellGap).Normalized()).ToArray();
+            // CellGap is deliberately zero for both supported presets. Sharing
+            // the immutable ring removes one jagged Vector3 array per cell
+            // (163,842 arrays on an Indev planet) without changing geometry.
+            _cellDirections[cell] = Mathf.IsZeroApprox(CellGap)
+                ? ring
+                : ring.Select(point => (point + normal * CellGap).Normalized()).ToArray();
             _cellNeighbors[cell] = new int[ring.Length];
             for (int edge = 0; edge < ring.Length; edge++)
                 _cellNeighbors[cell][edge] = SharedNeighbour(cell, orderedFaces[edge],
                     orderedFaces[(edge + 1) % orderedFaces.Length]);
         }
+        DualCellMilliseconds = adjacencyMilliseconds + phaseWatch.Elapsed.TotalMilliseconds;
+        TopologyMilliseconds = IcosphereMilliseconds + DualCellMilliseconds;
 
+        phaseWatch.Restart();
         InitializeChunkStreaming();
+        ChunkIndexMilliseconds = phaseWatch.Elapsed.TotalMilliseconds;
+    }
+
+    private int[] OrderAdjacentFaces(int cell, List<int> faces)
+    {
+        int count = faces.Count;
+        var ordered = new int[count];
+        if (count == 0) return ordered;
+        ordered[0] = faces[0];
+        var first = _faces[ordered[0]];
+        int sharedVertex = first.A != cell ? first.A : first.B != cell ? first.B : first.C;
+
+        for (int index = 1; index < count; index++)
+        {
+            int nextFace = -1;
+            for (int candidate = 1; candidate < count; candidate++)
+            {
+                int faceIndex = faces[candidate];
+                bool alreadyUsed = false;
+                for (int used = 1; used < index; used++)
+                    if (ordered[used] == faceIndex) { alreadyUsed = true; break; }
+                if (alreadyUsed) continue;
+                var face = _faces[faceIndex];
+                if (face.A == sharedVertex || face.B == sharedVertex || face.C == sharedVertex)
+                { nextFace = faceIndex; break; }
+            }
+            if (nextFace < 0)
+                throw new InvalidOperationException($"Broken face ring around cell {cell}.");
+            ordered[index] = nextFace;
+            var next = _faces[nextFace];
+            if (next.A != cell && next.A != sharedVertex) sharedVertex = next.A;
+            else if (next.B != cell && next.B != sharedVertex) sharedVertex = next.B;
+            else sharedVertex = next.C;
+        }
+        return ordered;
     }
 
     private void InitializeChunkStreaming()
@@ -615,8 +758,14 @@ public partial class HexPlanet : StaticBody3D
         GenerationProgress = 0f;
     }
 
-    private void RefreshStreaming(Vector3 targetDirection)
+    private void RefreshStreaming(Vector3 targetPosition)
     {
+        Vector3 targetDirection = targetPosition.Normalized();
+        float altitude = Mathf.Max(0f, targetPosition.Length() - SurfaceRadius(targetDirection));
+        // Detailed voxels, caves and ConcavePolygon collisions have no value
+        // high above the ground. Keeping them disabled in fast creative flight
+        // removes the largest streaming spikes and leaves the cheap surface LOD.
+        bool allowHighDetail = altitude <= Mathf.Max(8f, HighDetailDistance * 0.8f);
         _pendingChunks.Clear();
         var requests = new List<(int Chunk, int Lod, float Distance)>();
         for (int chunk = 0; chunk < _chunkCells.Length; chunk++)
@@ -631,13 +780,13 @@ public partial class HexPlanet : StaticBody3D
             // between full, simplified and unloaded states while walking.
             int wantedLod;
             if (!alreadyLoaded)
-                wantedLod = surfaceDistance <= HighDetailDistance ? 0
+                wantedLod = allowHighDetail && surfaceDistance <= HighDetailDistance ? 0
                     : surfaceDistance <= StreamingDistance ? 1 : -1;
             else if (previousLod == 0)
-                wantedLod = surfaceDistance <= HighDetailDistance + 3f ? 0
+                wantedLod = allowHighDetail && surfaceDistance <= HighDetailDistance + 3f ? 0
                     : surfaceDistance <= StreamingDistance + 6f ? 1 : -1;
             else
-                wantedLod = surfaceDistance <= HighDetailDistance - 2f ? 0
+                wantedLod = allowHighDetail && surfaceDistance <= HighDetailDistance - 2f ? 0
                     : surfaceDistance <= StreamingDistance + 6f ? 1 : -1;
 
             if (wantedLod < 0)
@@ -663,6 +812,7 @@ public partial class HexPlanet : StaticBody3D
 
     private void RebuildChunk(int chunkIndex, int lod)
     {
+        if (lod == 0) EnsureDetailedCavesForChunk(chunkIndex);
         var visualTool = new SurfaceTool();
         visualTool.Begin(Mesh.PrimitiveType.Triangles);
         List<VoxelTriangle>? hitTriangles = lod == 0 ? [] : null;
@@ -688,9 +838,11 @@ public partial class HexPlanet : StaticBody3D
                     AddTriangle(visualTool, center, directions[i] * topRadius,
                         directions[next] * topRadius, normal, color, blockType,
                         new Vector2(0.5f, 0.5f), PolygonUv(i, ring.Length), PolygonUv(next, ring.Length));
-                    // LOD chunks used to consist of top faces only, making
-                    // them look like floating lids before full streaming.
-                    float skirtRadius = topRadius - BlockHeight;
+                    // A one-block skirt is enough on gentle terrain, but it
+                    // left the new tall mountains open like floating lids.
+                    // Extend the distant wall all the way down to the actual
+                    // surface of the adjacent cell.
+                    float skirtRadius = LodSkirtRadius(cell, i, topRadius);
                     Vector3 topA = directions[i] * topRadius;
                     Vector3 topB = directions[next] * topRadius;
                     Vector3 lowA = ring[i].Normalized() * skirtRadius;
@@ -779,6 +931,51 @@ public partial class HexPlanet : StaticBody3D
             _chunkHitTriangles.Remove(chunkIndex);
             if (_chunkCollisions.Remove(chunkIndex, out CollisionShape3D? collision)) collision.QueueFree();
         }
+    }
+
+    private int SurfaceLayerForLod(int cell)
+    {
+        if (cell < 0 || cell >= _cellLevels.Length)
+            return MinimumLayer - 1;
+
+        int layer = _cellLevels[cell];
+        while (layer >= MinimumLayer && !IsOccupied(cell, layer))
+            layer--;
+        return layer;
+    }
+
+    private float LodSkirtRadius(int cell, int edge, float topRadius)
+    {
+        int neighbour = edge >= 0 && edge < _cellNeighbors[cell].Length
+            ? _cellNeighbors[cell][edge]
+            : -1;
+        int neighbourLayer = SurfaceLayerForLod(neighbour);
+        float neighbourRadius = Radius + neighbourLayer * BlockHeight;
+        return Mathf.Min(topRadius - BlockHeight, neighbourRadius);
+    }
+
+    public bool ValidateDistantCliffCoverage(out int cliffCount)
+    {
+        cliffCount = 0;
+        for (int cell = 0; cell < _cellLevels.Length; cell++)
+        {
+            int layer = SurfaceLayerForLod(cell);
+            if (layer < MinimumLayer) continue;
+            float topRadius = Radius + layer * BlockHeight;
+
+            for (int edge = 0; edge < _cellNeighbors[cell].Length; edge++)
+            {
+                int neighbour = _cellNeighbors[cell][edge];
+                int neighbourLayer = SurfaceLayerForLod(neighbour);
+                if (layer <= neighbourLayer + 1) continue;
+
+                cliffCount++;
+                float neighbourRadius = Radius + neighbourLayer * BlockHeight;
+                if (LodSkirtRadius(cell, edge, topRadius) > neighbourRadius + 0.001f)
+                    return false;
+            }
+        }
+        return cliffCount > 0;
     }
 
     private int SharedNeighbour(int cell, int firstFaceIndex, int secondFaceIndex)
@@ -890,30 +1087,19 @@ public partial class HexPlanet : StaticBody3D
         return shaped < -0.22f ? -0.6f : shaped * Relief;
     }
 
-    private void GenerateCaves()
+    private void InitializeProceduralCaves()
     {
         _removedVoxels.Clear();
-        float seedOffset = Seed * 0.00137f;
+        _caveEntranceFloors = new int[_vertices.Count];
+        _caveMaskLow = new ulong[_vertices.Count];
+        _caveMaskHigh = new ulong[_vertices.Count];
+        _caveCellGenerated = new bool[_vertices.Count];
+        _detailedCaveCellCount = 0;
+        Array.Fill(_caveEntranceFloors, int.MinValue);
         bool indev = GameSession.Current?.GenerationPreset == "Indev";
         for (int cell = 0; cell < _vertices.Count; cell++)
         {
             Vector3 p = _vertices[cell];
-            int caveCeiling = indev ? _cellLevels[cell] - 3 : _cellLevels[cell] - 1;
-            for (int layer = MinimumLayer + 1; layer <= caveCeiling; layer++)
-            {
-                // Low frequencies form connected chambers. A second, thinner
-                // field cuts winding tunnels between those larger volumes.
-                float chamber = Mathf.Sin(p.X * 10.5f + layer * 0.48f + seedOffset)
-                              + Mathf.Sin(p.Y * 12.0f - layer * 0.41f - seedOffset * 2f)
-                              + Mathf.Sin(p.Z * 9.0f + layer * 0.36f + seedOffset * 3f);
-                float tunnelField = Mathf.Sin(p.X * 21f + p.Z * 13f + layer * 0.72f + seedOffset * 5f)
-                                  + Mathf.Sin(p.Y * 18f - p.X * 11f - layer * 0.61f);
-                bool largeCave = chamber > 0.62f;
-                bool connectingTunnel = Mathf.Abs(tunnelField) < 0.16f && chamber > -0.55f;
-                if (largeCave || connectingTunnel)
-                    _removedVoxels.Add(VoxelKey(cell, layer));
-            }
-
             // Roughly one cell in 850 becomes a natural entrance. The shaft is
             // extended down to the first cave, guaranteeing a connected opening.
             uint entranceHash = (uint)cell * 73856093u ^ (uint)Seed * 19349663u;
@@ -925,19 +1111,70 @@ public partial class HexPlanet : StaticBody3D
             {
                 int surfaceLayer = _cellLevels[cell];
                 int caveLayer = surfaceLayer - 1;
-                while (caveLayer > MinimumLayer + 1 && IsOccupied(cell, caveLayer))
+                while (caveLayer > MinimumLayer + 1 && !IsBaseProceduralCave(cell, caveLayer))
                     caveLayer--;
-                for (int layer = surfaceLayer; layer >= caveLayer; layer--)
-                    _removedVoxels.Add(VoxelKey(cell, layer));
+                _caveEntranceFloors[cell] = caveLayer;
             }
         }
     }
 
+    private void EnsureDetailedCavesForChunk(int chunk)
+    {
+        foreach (int cell in _chunkCells[chunk])
+        {
+            if (_caveCellGenerated[cell]) continue;
+            ulong low = 0, high = 0;
+            for (int layer = MinimumLayer; layer <= _cellLevels[cell]; layer++)
+            {
+                if (!ComputeBaseProceduralCave(cell, layer)) continue;
+                int bit = layer - MinimumLayer;
+                if (bit < 64) low |= 1UL << bit;
+                else high |= 1UL << (bit - 64);
+            }
+            _caveMaskLow[cell] = low;
+            _caveMaskHigh[cell] = high;
+            _caveCellGenerated[cell] = true;
+            _detailedCaveCellCount++;
+        }
+    }
+
+    private bool IsBaseProceduralCave(int cell, int layer)
+    {
+        if (_caveCellGenerated.Length == _cellLevels.Length && _caveCellGenerated[cell])
+        {
+            int bit = layer - MinimumLayer;
+            if (bit < 0) return false;
+            return bit < 64
+                ? (_caveMaskLow[cell] & 1UL << bit) != 0
+                : bit < 128 && (_caveMaskHigh[cell] & 1UL << (bit - 64)) != 0;
+        }
+        return ComputeBaseProceduralCave(cell, layer);
+    }
+
+    private bool ComputeBaseProceduralCave(int cell, int layer)
+    {
+        bool indev = GameSession.Current?.GenerationPreset == "Indev";
+        int caveCeiling = indev ? _cellLevels[cell] - 3 : _cellLevels[cell] - 1;
+        if (layer < MinimumLayer + 1 || layer > caveCeiling) return false;
+        Vector3 p = _vertices[cell];
+        float seedOffset = Seed * 0.00137f;
+        float chamber = Mathf.Sin(p.X * 10.5f + layer * 0.48f + seedOffset)
+                      + Mathf.Sin(p.Y * 12.0f - layer * 0.41f - seedOffset * 2f)
+                      + Mathf.Sin(p.Z * 9.0f + layer * 0.36f + seedOffset * 3f);
+        float tunnelField = Mathf.Sin(p.X * 21f + p.Z * 13f + layer * 0.72f + seedOffset * 5f)
+                          + Mathf.Sin(p.Y * 18f - p.X * 11f - layer * 0.61f);
+        return chamber > 0.62f || Mathf.Abs(tunnelField) < 0.16f && chamber > -0.55f;
+    }
+
     private bool IsOccupied(int cell, int layer)
     {
-        return layer >= MinimumLayer
-            && layer <= _cellLevels[cell]
-            && !_removedVoxels.Contains(VoxelKey(cell, layer));
+        if (layer < MinimumLayer || layer > _cellLevels[cell]) return false;
+        long key = VoxelKey(cell, layer);
+        if (_playerPlacedVoxels.Contains(key)) return true;
+        bool entrance = _caveEntranceFloors.Length == _cellLevels.Length
+            && _caveEntranceFloors[cell] != int.MinValue
+            && layer >= _caveEntranceFloors[cell];
+        return !_removedVoxels.Contains(key) && !entrance && !IsBaseProceduralCave(cell, layer);
     }
 
     private static long VoxelKey(int cell, int layer)

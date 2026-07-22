@@ -14,6 +14,14 @@ public partial class HotbarInventory : CanvasLayer
     private HBoxContainer _hotbar = null!;
     private Control _inventory = null!;
     private GridContainer _catalogGrid = null!;
+    private VBoxContainer _layout = null!;
+    private Label _title = null!;
+    private Label _hint = null!;
+    private HBoxContainer _creativeTabs = null!;
+    private VBoxContainer _inventoryPage = null!;
+    private VBoxContainer _miscPage = null!;
+    private Button _inventoryTab = null!;
+    private Button _miscTab = null!;
     private readonly ItemSlotButton[] _hotbarSlots = new ItemSlotButton[9];
     private readonly ItemSlotButton[] _inventorySlots = new ItemSlotButton[InventorySize];
     private readonly ItemSlotButton[] _craftSlots = new ItemSlotButton[9];
@@ -22,11 +30,15 @@ public partial class HotbarInventory : CanvasLayer
     private bool _open;
     private ItemSlotButton? _manualDragSource;
     private Label _manualDragPreview = null!;
+    private string _activeCreativeTab = "Inventory";
 
     public bool IsOpen => _open;
     public bool HotbarAccessibleWhileOpen => _open && _hotbar.Visible
         && _hotbar.ZIndex > _inventory.ZIndex
         && Array.TrueForAll(_hotbarSlots, slot => slot != null && slot.MouseFilter == Control.MouseFilterEnum.Stop);
+    public bool CreativeTabsVisible => _creativeTabs.Visible;
+    public string ActivePage => GameSession.IsCreative ? _activeCreativeTab : "Inventory";
+    public int MiscCatalogCount => _creativeButtons.Count;
     public string SelectedItem => GameSession.Current is { } world && world.HotbarItems.Length == 9
         ? world.HotbarItems[Mathf.Clamp(world.SelectedHotbarSlot, 0, 8)] ?? "" : "";
     public int SelectedBlockType => Array.IndexOf(Catalog, SelectedItem) is int index && index is >= 0 and <= 5 ? index : -1;
@@ -41,6 +53,9 @@ public partial class HotbarInventory : CanvasLayer
         // overlay so its nine slots remain valid drag/drop targets while E is open.
         _inventory.ZIndex = 10;
         _hotbar.ZIndex = 20;
+        _layout = GetNode<VBoxContainer>("Inventory/Center/Panel/Layout");
+        _title = GetNode<Label>("Inventory/Center/Panel/Layout/Title");
+        _hint = GetNode<Label>("Inventory/Center/Panel/Layout/Hint");
         _catalogGrid = GetNode<GridContainer>("Inventory/Center/Panel/Layout/Grid");
         NormalizeAndMigrate();
         BuildHotbar();
@@ -55,6 +70,7 @@ public partial class HotbarInventory : CanvasLayer
         };
         AddChild(_manualDragPreview);
         _inventory.Visible = false;
+        ApplyGameModeLayout(selectDefaultTab: true);
         Refresh();
     }
 
@@ -139,8 +155,19 @@ public partial class HotbarInventory : CanvasLayer
 
     private void BuildInventoryAndCrafting()
     {
-        VBoxContainer layout = GetNode<VBoxContainer>("Inventory/Center/Panel/Layout");
-        GetNode<Label>("Inventory/Center/Panel/Layout/Hint").Text = "Drag stacks. Right-click a stack to split half into the first empty slot.";
+        _hint.Text = "Drag stacks. Right-click a stack to split half into the first empty slot.";
+        _creativeTabs = new HBoxContainer { Name = "CreativeTabs", Alignment = BoxContainer.AlignmentMode.Center };
+        _inventoryTab = new Button { Name = "InventoryTab", Text = "Inventory", CustomMinimumSize = new Vector2(180, 42) };
+        _miscTab = new Button { Name = "MiscTab", Text = "Misc", CustomMinimumSize = new Vector2(180, 42) };
+        _inventoryTab.Pressed += () => SelectCreativePage("Inventory");
+        _miscTab.Pressed += () => SelectCreativePage("Misc");
+        _creativeTabs.AddChild(_inventoryTab);
+        _creativeTabs.AddChild(_miscTab);
+        _layout.AddChild(_creativeTabs);
+
+        _inventoryPage = new VBoxContainer { Name = "InventoryPage" };
+        _layout.AddChild(_inventoryPage);
+        _catalogGrid.Reparent(_inventoryPage);
         _catalogGrid.Columns = 9;
         for (int slot = 0; slot < InventorySize; slot++)
         {
@@ -149,7 +176,7 @@ public partial class HotbarInventory : CanvasLayer
         }
 
         var craftTitle = new Label { Text = "3 × 3 CRAFTING", HorizontalAlignment = HorizontalAlignment.Center };
-        layout.AddChild(craftTitle);
+        _inventoryPage.AddChild(craftTitle);
         var row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         var craftGrid = new GridContainer { Columns = 3 };
         for (int slot = 0; slot < 9; slot++)
@@ -161,22 +188,23 @@ public partial class HotbarInventory : CanvasLayer
         _craftOutput = new Button { CustomMinimumSize = new Vector2(150, 64), Text = "No recipe" };
         _craftOutput.Pressed += Craft;
         row.AddChild(_craftOutput);
-        layout.AddChild(row);
+        _inventoryPage.AddChild(row);
 
-        if (GameSession.IsCreative)
+        _miscPage = new VBoxContainer { Name = "MiscPage" };
+        _layout.AddChild(_miscPage);
+        var paletteTitle = new Label { Text = "ALL ITEMS", HorizontalAlignment = HorizontalAlignment.Center };
+        _miscPage.AddChild(paletteTitle);
+        var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(640, 390) };
+        var palette = new GridContainer { Name = "CompleteCatalog", Columns = 5, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        foreach (string item in Catalog)
         {
-            var paletteTitle = new Label { Text = "CREATIVE CATALOG", HorizontalAlignment = HorizontalAlignment.Center };
-            layout.AddChild(paletteTitle);
-            var palette = new GridContainer { Columns = 5 };
-            foreach (string item in Catalog)
-            {
-                var button = new Button { Text = item, CustomMinimumSize = new Vector2(116, 36) };
-                button.Pressed += () => AssignCreative(item);
-                _creativeButtons[item] = button;
-                palette.AddChild(button);
-            }
-            layout.AddChild(palette);
+            var button = new Button { Text = item, CustomMinimumSize = new Vector2(116, 36) };
+            button.Pressed += () => AssignCreative(item);
+            _creativeButtons[item] = button;
+            palette.AddChild(button);
         }
+        scroll.AddChild(palette);
+        _miscPage.AddChild(scroll);
     }
 
     private ItemSlotButton CreateSlot(ItemSlotButton.SlotArea area, int slot, Vector2 size) => new()
@@ -396,6 +424,15 @@ public partial class HotbarInventory : CanvasLayer
         return button.GetGlobalRect().GetCenter();
     }
 
+    public bool MiscContainsForValidation(string item) => _creativeButtons.ContainsKey(item);
+    public void SelectPageForValidation(string page) => SelectCreativePage(page);
+    public bool AssignCreativeForValidation(string item)
+    {
+        if (!_creativeButtons.ContainsKey(item)) return false;
+        AssignCreative(item);
+        return SelectedItem == item;
+    }
+
     private string? Recipe()
     {
         bool Match(string?[] pattern)
@@ -513,12 +550,42 @@ public partial class HotbarInventory : CanvasLayer
         _open = !_open;
         _inventory.Visible = _open;
         _hotbar.Visible = true;
+        if (_open) ApplyGameModeLayout(selectDefaultTab: true);
         if (!_open)
         {
             _manualDragSource = null;
             if (_manualDragPreview != null) _manualDragPreview.Visible = false;
         }
         Input.MouseMode = _open ? Input.MouseModeEnum.Visible : Input.MouseModeEnum.Captured;
+    }
+
+    public void OnGameModeChanged()
+    {
+        ApplyGameModeLayout(selectDefaultTab: true);
+        Refresh();
+    }
+
+    private void ApplyGameModeLayout(bool selectDefaultTab)
+    {
+        if (_creativeTabs == null) return;
+        bool creative = GameSession.IsCreative;
+        _creativeTabs.Visible = creative;
+        _title.Text = creative ? "CREATIVE INVENTORY" : "INVENTORY AND 3 × 3 CRAFTING";
+        if (selectDefaultTab) _activeCreativeTab = creative ? "Misc" : "Inventory";
+        SelectCreativePage(_activeCreativeTab);
+    }
+
+    private void SelectCreativePage(string page)
+    {
+        if (!GameSession.IsCreative) page = "Inventory";
+        _activeCreativeTab = page == "Misc" ? "Misc" : "Inventory";
+        _inventoryPage.Visible = _activeCreativeTab == "Inventory";
+        _miscPage.Visible = _activeCreativeTab == "Misc";
+        _inventoryTab.Disabled = _activeCreativeTab == "Inventory";
+        _miscTab.Disabled = _activeCreativeTab == "Misc";
+        _hint.Text = _activeCreativeTab == "Misc"
+            ? "Choose any item to place it in the selected hotbar slot."
+            : "Drag stacks. Right-click a stack to split half into the first empty slot.";
     }
     private void EnsureToolDurability(string item)
     {

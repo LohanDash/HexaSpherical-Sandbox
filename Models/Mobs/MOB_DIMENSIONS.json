@@ -30,5 +30,13 @@
       "preserved_original_scale": 0.72,
       "approximate_size_metres": [1.62, 3.706, 6.604]
     }
+  },
+  "Sheep": {
+    "source": "PolyPizza/sheep_quaternius.glb",
+    "normal": {
+      "scale": 0.52,
+      "yaw_degrees": 180,
+      "target_height_metres": 1.05
+    }
   }
 }

@@ -58,13 +58,14 @@ public partial class SurvivalSystem : Node3D
         }
     }
 
-    public bool UseSelected(Vector3 placementDirection)
+    public bool UseSelected(Vector3 rayOrigin, Vector3 rayDirection)
     {
         string item = _inventory.SelectedItem;
         if (item == "Campfire")
         {
+            if (!_planet.TryGetSurfaceObjectPlacement(rayOrigin, rayDirection,
+                out Vector3 position, 0.05f, 0.65f)) return false;
             if (!_inventory.ConsumeSelected()) return true;
-            Vector3 position = _planet.PassiveMobSurfacePosition(placementDirection, 0.05f);
             CreateCampfireVisual(position);
             GameSession.Current?.Campfires.Add([position.X, position.Y, position.Z]);
             SoundManager.Play(SoundKind.BlockPlace);
@@ -72,8 +73,9 @@ public partial class SurvivalSystem : Node3D
         }
         if (item == "Bed")
         {
+            if (!_planet.TryGetSurfaceObjectPlacement(rayOrigin, rayDirection,
+                out Vector3 position, 0.08f, 0.72f)) return false;
             if (!_inventory.ConsumeSelected()) return true;
-            Vector3 position = _planet.PassiveMobSurfacePosition(placementDirection, 0.08f);
             CreateBedVisual(position);
             GameSession.Current?.Beds.Add(ToSavePosition(position));
             SoundManager.Play(SoundKind.BlockPlace);

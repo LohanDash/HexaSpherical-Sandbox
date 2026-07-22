@@ -49,6 +49,10 @@ public partial class PauseMenuTest : Node
                 throw new InvalidOperationException("Passive spawn egg failed.");
             if (!mobs.SpawnEgg("Cow", Vector3.Up))
                 throw new InvalidOperationException("Cow spawn failed.");
+            int chickenCalls = SoundManager.PlayCountForValidation(SoundKind.Chicken);
+            if (!mobs.TriggerChickenAmbientForValidation()
+                || SoundManager.PlayCountForValidation(SoundKind.Chicken) != chickenCalls + 1)
+                throw new InvalidOperationException("A real chicken did not produce its ambient cluck.");
             for (int frame = 0; frame < 12 && !mobs.AllMobLocomotionReady; frame++)
                 await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
             if (!mobs.AllMobLocomotionReady)
@@ -93,6 +97,30 @@ public partial class PauseMenuTest : Node
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             if (!inventory.IsOpen || !inventory.HotbarAccessibleWhileOpen)
                 throw new InvalidOperationException("The hotbar is hidden or blocked while the inventory is open.");
+            if (!inventory.CreativeTabsVisible || inventory.ActivePage != "Misc"
+                || inventory.MiscCatalogCount != HotbarInventory.Catalog.Length
+                || !inventory.MiscContainsForValidation("Shears")
+                || !inventory.MiscContainsForValidation("Wool")
+                || !inventory.MiscContainsForValidation("Bed")
+                || !inventory.MiscContainsForValidation("Sheep Egg"))
+                throw new InvalidOperationException("Creative E did not open the complete Misc catalogue.");
+            if (!planet.TryGetInteractionTriangleSample(HexPlanet.VoxelFace.Top, false,
+                out Vector3 eggOrigin, out Vector3 eggDirection, out HexPlanet.VoxelRayHit eggFloor)
+                || !inventory.AssignCreativeForValidation("Sheep Egg"))
+                throw new InvalidOperationException("The creative Sheep Egg could not be selected from Misc.");
+            int mobsBeforeEgg = mobs.MobCount;
+            if (!player.TryUseSpawnEggForValidation("Sheep Egg", eggOrigin, eggDirection)
+                || mobs.MobCount != mobsBeforeEgg + 1)
+                throw new InvalidOperationException("The selected creative spawn egg did not create its mob.");
+            if (!Mathf.IsEqualApprox(mobs.LastSpawnedModelScale, 0.52f))
+                throw new InvalidOperationException("The sheep model did not use its calibrated full-size scale.");
+            Vector3 expectedEggPosition = eggFloor.Position.Normalized() * (eggFloor.Position.Length() + 0.1f);
+            if (mobs.LastSpawnedMobAimPosition.Normalized().Dot(expectedEggPosition.Normalized()) < 0.999f)
+                throw new InvalidOperationException("The spawn egg created its mob away from the targeted floor.");
+            inventory.SelectPageForValidation("Inventory");
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (inventory.ActivePage != "Inventory")
+                throw new InvalidOperationException("The creative Inventory tab did not open the Survival inventory page.");
             inventory.AddItem("Grass Block");
             int dragSourceSlot = inventory.FindItemSlotForValidation(ItemSlotButton.SlotArea.Hotbar, "Grass Block");
             Vector2 dragSource = inventory.SlotCenterForValidation(ItemSlotButton.SlotArea.Hotbar, dragSourceSlot);
@@ -111,6 +139,18 @@ public partial class PauseMenuTest : Node
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             if (inventory.IsOpen) throw new InvalidOperationException("E did not close the inventory.");
 
+            GameSession.Current.GameMode = "Survival";
+            player.OnGameModeChanged();
+            if (inventory.CreativeTabsVisible || inventory.ActivePage != "Inventory")
+                throw new InvalidOperationException("Switching to Survival did not restore the Survival E inventory.");
+            GameSession.Current.GameMode = "Creative";
+            player.OnGameModeChanged();
+            Input.ParseInputEvent(new InputEventKey { Keycode = Key.E, Pressed = true });
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!inventory.IsOpen || !inventory.CreativeTabsVisible || inventory.ActivePage != "Misc")
+                throw new InvalidOperationException("Switching back to Creative did not change E to the creative tabs.");
+            Input.ParseInputEvent(new InputEventKey { Keycode = Key.E, Pressed = true });
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             GameSession.Current.GameMode = "Survival";
             player.OnGameModeChanged();
 
@@ -134,9 +174,12 @@ public partial class PauseMenuTest : Node
                 throw new InvalidOperationException("Primitive Pickaxe did not break after four blocks and refund materials.");
 
             int acceptedHostiles = 0;
-            for (int spawn = 0; spawn < 5; spawn++) if (monsters.SpawnEgg("Night Crawler Egg", Vector3.Up)) acceptedHostiles++;
+            for (int spawn = 0; spawn < 5; spawn++) if (monsters.SpawnNaturalForValidation(Vector3.Up)) acceptedHostiles++;
             if (acceptedHostiles != 3 || monsters.MaximumCountInAnyChunk() > 3)
                 throw new InvalidOperationException("Hostile per-chunk cap is not exactly three.");
+            if (!monsters.SpawnEgg("Night Crawler Egg", Vector3.Up)
+                || monsters.MaximumCountInAnyChunk() <= 3)
+                throw new InvalidOperationException("A deliberate spawn egg was incorrectly blocked by the natural chunk cap.");
 
             int footstepsBefore = player.FootstepSoundCount;
             for (int sample = 0; sample < 40; sample++) player.RegisterFootstepTravelForValidation(0.12f, true, false);

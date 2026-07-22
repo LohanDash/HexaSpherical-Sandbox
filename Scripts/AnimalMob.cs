@@ -33,8 +33,10 @@ public partial class AnimalMob : Node3D
     private Vector3 _lastKnownPosition;
     private bool _sheared;
     private float _woolRegrowSeconds;
+    private float _ambientSoundTimer;
 
     public int CurrentChunk => _currentChunk;
+    public float ModelScale => _modelLocalTransform.Basis.Scale.X;
     public bool IsDying => _dying;
     public bool HasActiveWalkAnimation => MobType is "Cow" or "Sheep"
         ? _animationPlayer?.IsPlaying() == true && _animationPlayer.CurrentAnimation.ToString().Contains("Walk")
@@ -71,7 +73,7 @@ public partial class AnimalMob : Node3D
             // Source files use radically different units. These calibrated
             // scales produce a ~1.3 m cow and a ~1.0 m chicken. The former
             // gigantic values are archived in MOB_DIMENSIONS.json for bosses.
-            float scale = MobType is "Cow" or "Sheep" ? 0.2525f : 0.00529f;
+            float scale = MobType switch { "Cow" => 0.2525f, "Sheep" => 0.52f, _ => 0.00529f };
             visual.Scale = Vector3.One * scale;
             // AI forward is -Z. The chicken source faces -X and the cow
             // source faces +Z, so each asset needs its own yaw correction.
@@ -95,12 +97,14 @@ public partial class AnimalMob : Node3D
         _speed = MobType switch { "Cow" => 0.55f, "Sheep" => 0.62f, _ => 0.8f };
         _health = MobType switch { "Cow" => 8f, "Sheep" => 6f, _ => 3f };
         _movementAccumulator = (float)GD.RandRange(0.0, 0.1);
+        _ambientSoundTimer = MobType == "Chicken" ? (float)GD.RandRange(3.0, 12.0) : float.MaxValue;
         PickHeading();
     }
 
     public override void _PhysicsProcess(double deltaValue)
     {
         if (_dying || !_streamed || !IsInstanceValid(_planet) || GlobalPosition.LengthSquared() < 1f) return;
+        UpdateAmbientSound((float)deltaValue);
         if (_sheared && (_woolRegrowSeconds -= (float)deltaValue) <= 0f)
         {
             _sheared = false;
@@ -126,7 +130,8 @@ public partial class AnimalMob : Node3D
         Vector3 up = GlobalPosition.Normalized();
         _heading = (_heading - up * _heading.Dot(up)).Normalized();
         Vector3 candidateDirection = (GlobalPosition + _heading * _speed * delta).Normalized();
-        if (_planet.ResolvePassiveMobSurface(candidateDirection, ref _surfaceCell,
+        float bodyHeight = MobType switch { "Cow" => 1.25f, "Sheep" => 1.05f, _ => 0.72f };
+        if (_planet.ResolveMobSurfaceNear(candidateDirection, GlobalPosition.Length(), bodyHeight, ref _surfaceCell,
             out Vector3 surfacePosition, out int chunk))
         {
             GlobalPosition = surfacePosition;
@@ -148,8 +153,7 @@ public partial class AnimalMob : Node3D
     {
         GlobalPosition = position;
         _lastKnownPosition = position;
-        _planet.ResolvePassiveMobSurface(position.Normalized(), ref _surfaceCell,
-            out _, out _currentChunk);
+        _currentChunk = _planet.ChunkAt(position.Normalized());
         _currentVisualTransform = GlobalTransform * _modelLocalTransform;
         _previousVisualTransform = _currentVisualTransform;
         RenderInterpolatedModel();
@@ -229,8 +233,24 @@ public partial class AnimalMob : Node3D
         _health -= amount;
         _damageReaction = 0.18f;
         SoundManager.Play(SoundKind.Hit, -12f);
-        SoundManager.Play(MobType == "Cow" ? SoundKind.Cow : SoundKind.Chicken, -8f);
         return _health <= 0f;
+    }
+
+    private void UpdateAmbientSound(float delta)
+    {
+        if (MobType != "Chicken") return;
+        _ambientSoundTimer -= delta;
+        if (_ambientSoundTimer > 0f) return;
+        SoundManager.Play(SoundKind.Chicken, -13f);
+        _ambientSoundTimer = (float)GD.RandRange(8.0, 24.0);
+    }
+
+    public bool PlayAmbientSoundForValidation()
+    {
+        if (MobType != "Chicken") return false;
+        SoundManager.Play(SoundKind.Chicken, -13f);
+        _ambientSoundTimer = (float)GD.RandRange(8.0, 24.0);
+        return true;
     }
 
     public bool TryShear(out Vector3 dropPosition)

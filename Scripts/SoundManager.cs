@@ -10,12 +10,14 @@ public enum SoundKind { Footstep, BlockBreak, BlockPlace, Cow, Chicken, Hawk, Mo
 public partial class SoundManager : Node
 {
     private static SoundManager? _instance;
+    private static readonly Dictionary<SoundKind, int> _playCounts = [];
     private readonly Dictionary<SoundKind, AudioStream> _sounds = [];
     private AudioStreamPlayer _rain = null!;
 
     public override void _Ready()
     {
         _instance = this;
+        _playCounts.Clear();
         foreach (SoundKind kind in Enum.GetValues<SoundKind>())
         {
             AudioStream? stream = LoadRecordedAnimal(kind) ?? (IsAnimal(kind) ? null : Build(kind, loop: kind == SoundKind.Rain));
@@ -30,11 +32,14 @@ public partial class SoundManager : Node
     public static void Play(SoundKind kind, float volumeDb = -8f)
     {
         if (_instance == null || !_instance._sounds.TryGetValue(kind, out AudioStream? stream)) return;
+        _playCounts[kind] = _playCounts.GetValueOrDefault(kind) + 1;
         var player = new AudioStreamPlayer { Stream = stream, VolumeDb = volumeDb };
         _instance.AddChild(player);
         player.Finished += player.QueueFree;
         player.Play();
     }
+
+    public static int PlayCountForValidation(SoundKind kind) => _playCounts.GetValueOrDefault(kind);
 
     private static bool IsAnimal(SoundKind kind) => kind is SoundKind.Cow or SoundKind.Chicken or SoundKind.Hawk;
 

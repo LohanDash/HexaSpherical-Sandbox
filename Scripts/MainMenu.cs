@@ -18,7 +18,7 @@ public partial class MainMenu : Control
 
     public override void _Ready()
     {
-        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.4");
+        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.5");
         _worldList = GetNode<ItemList>("Center/Panel/Layout/Worlds");
         _name = GetNode<LineEdit>("Center/Panel/Layout/NewName");
         _mode = GetNode<OptionButton>("Center/Panel/Layout/Mode");
@@ -31,7 +31,7 @@ public partial class MainMenu : Control
         _quality.AddItem("Low — recommended for laptops");
         _quality.AddItem("Balanced");
         _quality.AddItem("High — desktop PC");
-        _generation.AddItem("Alpha Indev — 8× planet");
+        _generation.AddItem("Normal — 8× planet");
         _generation.AddItem("PreIndev — legacy planet");
         _worldList.ItemSelected += index => ShowDetails((int)index);
         _worldList.ItemActivated += index => LoadWorldAt((int)index);
@@ -74,7 +74,7 @@ public partial class MainMenu : Control
     private static string PresetLabel(WorldData world) =>
         world.GenerationPreset == "Indev"
             ? world.TerrainGenerationVersion >= IndevBiomeTerrain.CurrentVersion
-                ? "Alpha Indev Biomes (288 m)" : "Alpha Indev Legacy (288 m)"
+                ? "Normal (288 m)" : "Normal Legacy (288 m)"
             : "PreIndev (36 m)";
 
     private void LoadWorld()

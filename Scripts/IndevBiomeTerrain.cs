@@ -10,17 +10,29 @@ public readonly record struct TerrainBiomeSample(
     float Height, int SurfaceBlockType, float VegetationDensity);
 
 /// <summary>
-/// Deterministic Alpha Indev V2 terrain. Biome selection, macro shape,
+/// Deterministic versioned Alpha Indev terrain. Biome selection, macro shape,
 /// biome-specific relief and surface material are intentionally separate.
 /// </summary>
 public sealed class IndevBiomeTerrain
 {
-    public const int CurrentVersion = 2;
+    public const int FirstVersion = 2;
+    public const int CurrentVersion = 3;
     private readonly int _seed;
+    private readonly int _version;
+    public int Version => _version;
 
-    public IndevBiomeTerrain(int seed) => _seed = seed;
+    public IndevBiomeTerrain(int seed, int version = CurrentVersion)
+    {
+        _seed = seed;
+        _version = Mathf.Clamp(version, FirstVersion, CurrentVersion);
+    }
 
     public TerrainBiomeSample Sample(Vector3 direction)
+    {
+        return _version >= 3 ? SampleColossalMountains(direction) : SampleV2(direction);
+    }
+
+    private TerrainBiomeSample SampleV2(Vector3 direction)
     {
         Vector3 p = direction.Normalized();
 
@@ -75,6 +87,69 @@ public sealed class IndevBiomeTerrain
             _ => 0
         };
         float vegetation = plainsWeight * 0.18f + desertWeight * 0.004f + mountainWeight * 0.018f;
+        return new TerrainBiomeSample(biome, plainsWeight, desertWeight, mountainWeight,
+            height, surface, vegetation);
+    }
+
+    private TerrainBiomeSample SampleColossalMountains(Vector3 direction)
+    {
+        Vector3 p = direction.Normalized();
+
+        float region = Fractal(p * 1.18f, 3, 0.52f, 11);
+        float climate = Fractal((p + new Vector3(13.7f, -4.2f, 8.9f)) * 0.92f, 3, 0.55f, 37);
+        float mountainContinents = Fractal((p + new Vector3(-8.4f, 5.7f, 11.9f)) * 1.65f, 3, 0.54f, 49);
+        float mountainSuitability = region + climate * 0.2f + mountainContinents * 0.32f;
+        float desertSuitability = -region + climate * 0.16f - mountainContinents * 0.08f;
+
+        // V3 deliberately dedicates much larger continuous portions of the
+        // globe to mountains. The overlap still blends borders smoothly.
+        float mountainWeight = Mathf.SmoothStep(-0.16f, 0.22f, mountainSuitability);
+        float desertWeight = Mathf.SmoothStep(0.08f, 0.38f, desertSuitability);
+        float plainsWeight = 0.16f + (1f - Mathf.SmoothStep(0.05f, 0.42f, Mathf.Abs(region))) * 0.76f;
+        float total = plainsWeight + desertWeight + mountainWeight;
+        plainsWeight /= total; desertWeight /= total; mountainWeight /= total;
+
+        float macro = Fractal((p + new Vector3(-2.1f, 7.4f, 3.8f)) * 1.75f, 4, 0.52f, 71);
+        float plainRoll = Fractal(p * 6.8f, 4, 0.5f, 101);
+        float plainDetail = Fractal(p * 23f, 2, 0.4f, 131);
+        float plainsHeight = 9f + macro * 5.2f + plainRoll * 7.4f + plainDetail * 0.8f;
+
+        float duneA = Fractal(p * 5.3f, 3, 0.46f, 173);
+        float duneB = Fractal((p + new Vector3(5.3f, 1.7f, -9.1f)) * 3.6f, 2, 0.5f, 191);
+        float dunes = Mathf.Abs(duneA * 0.72f + duneB * 0.28f);
+        float desertHeight = 6.0f + macro * 1.2f + dunes * 3.0f;
+
+        // Very broad range masks establish chains hundreds of metres long;
+        // two ridged fields then carve major crests and secondary spurs.
+        float rangeField = Fractal((p + new Vector3(-7.8f, 3.1f, 12.6f)) * 1.75f, 4, 0.54f, 223);
+        float rangeMask = Mathf.SmoothStep(-0.38f, 0.48f, rangeField + mountainContinents * 0.35f);
+        float greatRidges = RidgedFractal(p * 2.5f, 4, 0.48f, 251);
+        float spurRidges = RidgedFractal((p + new Vector3(4.6f, -8.2f, 2.4f)) * 5f, 3, 0.45f, 281);
+        float peakMask = Mathf.Pow(greatRidges, 1.28f);
+        float mountainHeight = -8f + macro * 8f
+            + rangeMask * (12f + peakMask * 72f + spurRidges * 14f);
+
+        float lowlandWeight = plainsWeight + desertWeight;
+        float lowlandHeight = (plainsHeight * plainsWeight + desertHeight * desertWeight)
+            / Mathf.Max(0.0001f, lowlandWeight);
+        float mountainBlend = Mathf.SmoothStep(0.18f, 0.75f, mountainWeight);
+        float height = Mathf.Lerp(lowlandHeight, mountainHeight, mountainBlend);
+        // A strong core term prevents normalized biome blending from turning
+        // an eighty-metre massif into an ordinary hill.
+        height += rangeMask * Mathf.Pow(mountainBlend, 1.35f) * 24f;
+        height = Mathf.Clamp(height, -4f, 82f);
+
+        TerrainBiome biome = mountainWeight >= plainsWeight && mountainWeight >= desertWeight
+            ? TerrainBiome.Mountains
+            : desertWeight >= plainsWeight ? TerrainBiome.Desert : TerrainBiome.Plains;
+        int surface = biome switch
+        {
+            TerrainBiome.Desert => 3,
+            TerrainBiome.Mountains when height >= 39f => 4,
+            TerrainBiome.Mountains => 2,
+            _ => 0
+        };
+        float vegetation = plainsWeight * 0.2f + desertWeight * 0.003f + mountainWeight * 0.012f;
         return new TerrainBiomeSample(biome, plainsWeight, desertWeight, mountainWeight,
             height, surface, vegetation);
     }

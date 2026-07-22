@@ -25,6 +25,11 @@ public partial class SaveSystemTest : Node
                 "new Indev world did not opt into the current biome generator");
             Assert(WorldStore.Load(biomeWorld.Id).TerrainGenerationVersion == IndevBiomeTerrain.CurrentVersion,
                 "terrain generation version was not persisted");
+            biomeWorld.TerrainGenerationVersion = 2;
+            Assert(WorldStore.SaveAndFlush(biomeWorld, TimeSpan.FromSeconds(8)), "V2 compatibility save timed out");
+            WorldData loadedV2 = WorldStore.Load(biomeWorld.Id);
+            Assert(loadedV2.GenerationPreset == "Indev" && loadedV2.TerrainGenerationVersion == 2,
+                "existing V2 world was silently upgraded or renamed");
             WorldStore.Delete(biomeWorld);
 
             world.Health = 73f;

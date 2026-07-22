@@ -53,7 +53,7 @@ public partial class Main : Node3D
 
     public override void _Ready()
     {
-        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.4");
+        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.5");
         var environment = new Environment
         {
             BackgroundMode = Environment.BGMode.Color,

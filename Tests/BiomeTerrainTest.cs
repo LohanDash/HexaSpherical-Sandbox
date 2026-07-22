@@ -35,15 +35,15 @@ public partial class BiomeTerrainTest : Node
                 Vector3 tangent = direction.Cross(Mathf.Abs(direction.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
                 Vector3 nearby = (direction + tangent * 0.0015f).Normalized();
                 float localStep = Mathf.Abs(first.Sample(nearby).Height - a.Height);
-                if (a.Biome == TerrainBiome.Plains && a.PlainsWeight > 0.58f)
+                if (a.Biome == TerrainBiome.Plains && a.PlainsWeight > 0.72f)
                 {
                     plains.Add(a.Height); plainSlope += localStep; plainSlopeCount++;
                 }
-                else if (a.Biome == TerrainBiome.Desert && a.DesertWeight > 0.58f)
+                else if (a.Biome == TerrainBiome.Desert && a.DesertWeight > 0.72f)
                 {
                     deserts.Add(a.Height); desertSlope += localStep; desertSlopeCount++;
                 }
-                else if (a.Biome == TerrainBiome.Mountains && a.MountainWeight > 0.58f)
+                else if (a.Biome == TerrainBiome.Mountains && a.MountainWeight > 0.72f)
                     mountains.Add(a.Height);
 
                 float strongest = Mathf.Max(a.PlainsWeight, Mathf.Max(a.DesertWeight, a.MountainWeight));
@@ -62,9 +62,14 @@ public partial class BiomeTerrainTest : Node
                 throw new InvalidOperationException($"Desert is not flatter than plains: D={averageDesertSlope:F4}, P={averagePlainSlope:F4}.");
             float plainAmplitude = Range(plains);
             float mountainAmplitude = Range(mountains);
-            if (mountainAmplitude < plainAmplitude * 1.65f || mountainAmplitude < 18f)
-                throw new InvalidOperationException($"Mountains lack amplitude: M={mountainAmplitude:F2}, P={plainAmplitude:F2}.");
-            if (transitionCount < 100 || maximumTransitionStep > 1.35f)
+            float highestMountain = Maximum(mountains);
+            int colossalSamples = mountains.FindAll(height => height >= 55f).Count;
+            if (mountainAmplitude < plainAmplitude * 2.4f || mountainAmplitude < 48f
+                || highestMountain < 70f || colossalSamples < 120)
+                throw new InvalidOperationException($"Mountains lack amplitude: M={mountainAmplitude:F2}, P={plainAmplitude:F2}, peak={highestMountain:F2}, colossal={colossalSamples}.");
+            // V3's eighty-metre massifs legitimately have steeper continuous
+            // foothills than V2, while still forbidding abrupt vertical walls.
+            if (transitionCount < 100 || maximumTransitionStep > 1.75f)
                 throw new InvalidOperationException($"Biome transition discontinuity: count={transitionCount}, max step={maximumTransitionStep:F3}.");
 
             ValidatePreIndevFingerprint(seed);
@@ -113,5 +118,12 @@ public partial class BiomeTerrainTest : Node
         float minimum = float.MaxValue, maximum = float.MinValue;
         foreach (float value in values) { minimum = Mathf.Min(minimum, value); maximum = Mathf.Max(maximum, value); }
         return maximum - minimum;
+    }
+
+    private static float Maximum(List<float> values)
+    {
+        float maximum = float.MinValue;
+        foreach (float value in values) maximum = Mathf.Max(maximum, value);
+        return maximum;
     }
 }

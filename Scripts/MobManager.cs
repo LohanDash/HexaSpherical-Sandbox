@@ -12,11 +12,16 @@ public partial class MobManager : Node3D
         ? mob.GlobalPosition + mob.GlobalPosition.Normalized() * 0.65f : Vector3.Zero;
     public Vector3 LastSpawnedMobAimPosition => _lastSpawnedMob is { } mob && IsInstanceValid(mob)
         ? mob.GlobalPosition + mob.GlobalPosition.Normalized() * 0.65f : Vector3.Zero;
+    public float LastSpawnedModelScale => _lastSpawnedMob is { } mob && IsInstanceValid(mob) ? mob.ModelScale : 0f;
     public int DyingSceneNodeCount => GetChildren().OfType<AnimalMob>().Count(mob => IsInstanceValid(mob) && mob.IsDying);
     public bool AllMobLocomotionReady => _mobs.Values.All(mob => !IsInstanceValid(mob) || mob.HasActiveWalkAnimation);
     public bool AllMobLimbConfigurationsValid => _mobs.Values.All(mob => !IsInstanceValid(mob) || mob.HasExactlyOneVisibleLegSet);
     public string LocomotionDebug => string.Join("; ", _mobs.Values.Where(IsInstanceValid).Select(mob => mob.LocomotionDebug));
-    private const int MaximumMobs = 28;
+    public bool TriggerChickenAmbientForValidation()
+        => _mobs.Values.FirstOrDefault(mob => IsInstanceValid(mob) && mob.MobType == "Chicken")
+            ?.PlayAmbientSoundForValidation() == true;
+    private const int MaximumNaturalMobs = 28;
+    private const int MaximumSpawnEggMobs = 64;
     private const int MaximumMobsPerChunk = 5;
     private readonly Dictionary<string, AnimalMob> _mobs = [];
     private HexPlanet _planet = null!;
@@ -37,7 +42,7 @@ public partial class MobManager : Node3D
 
         foreach (MobSaveData saved in GameSession.Current?.Mobs ?? [])
         {
-            if (saved.Position.Length != 3 || _mobs.Count >= MaximumMobs) continue;
+            if (saved.Position.Length != 3 || _mobs.Count >= MaximumSpawnEggMobs) continue;
             Spawn(saved.Type, new Vector3(saved.Position[0], saved.Position[1], saved.Position[2]), saved.Id,
                 saved.Sheared, saved.WoolRegrowSeconds);
         }
@@ -61,7 +66,7 @@ public partial class MobManager : Node3D
         _existingChunkAttempt -= (float)delta;
         if (_existingChunkAttempt > 0f) return;
         _existingChunkAttempt = (float)GD.RandRange(6.0, 12.0);
-        if (_mobs.Count >= MaximumMobs || GD.Randf() > 0.82f) return;
+        if (_mobs.Count >= MaximumNaturalMobs || GD.Randf() > 0.82f) return;
 
         Vector3 up = _player.GlobalPosition.Normalized();
         Vector3 right = _camera.GlobalBasis.X;
@@ -73,7 +78,7 @@ public partial class MobManager : Node3D
 
     private void OnNewHighDetailChunk(Vector3 direction)
     {
-        if (_mobs.Count >= MaximumMobs || GD.Randf() > 0.28f) return;
+        if (_mobs.Count >= MaximumNaturalMobs || GD.Randf() > 0.28f) return;
         TrySpawnHiddenGroup(direction);
     }
 
@@ -97,7 +102,7 @@ public partial class MobManager : Node3D
         float speciesRoll = GD.Randf();
         string type = speciesRoll < 0.44f ? "Chicken" : speciesRoll < 0.76f ? "Cow" : "Sheep";
         int groupSize = Math.Min(GD.Randf() < 0.58f ? 2 : 3, remainingCapacity);
-        for (int member = 0; member < groupSize && _mobs.Count < MaximumMobs; member++)
+        for (int member = 0; member < groupSize && _mobs.Count < MaximumNaturalMobs; member++)
         {
             float groupAngle = (float)GD.RandRange(0.0, Mathf.Tau);
             float spread = member == 0 ? 0f : (float)GD.RandRange(0.018, 0.05);
@@ -132,8 +137,15 @@ public partial class MobManager : Node3D
 
     public bool SpawnEgg(string type, Vector3 direction)
     {
-        if (_mobs.Count >= MaximumMobs) return false;
+        if (_mobs.Count >= MaximumSpawnEggMobs) return false;
         Spawn(type, _planet.PassiveMobSurfacePosition(direction));
+        return true;
+    }
+
+    public bool SpawnEggAt(string type, Vector3 position)
+    {
+        if (_mobs.Count >= MaximumSpawnEggMobs) return false;
+        Spawn(type, position);
         return true;
     }
 

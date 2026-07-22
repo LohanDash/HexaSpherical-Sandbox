@@ -251,15 +251,12 @@ public partial class SphericalPlayer : CharacterBody3D
                     if (woolProduced) _inventory.ConsumeToolUse("Shears");
                 }
                 else if (_survival.TryInteract(_camera.GlobalPosition, direction)) { }
-                else if (!GameSession.IsCreative && _survival.UseSelected(spawnDirection)) { }
+                else if (!GameSession.IsCreative && _survival.UseSelected(_camera.GlobalPosition, direction)) { }
                 else if (GameSession.IsCreative && (item == "Campfire" || item == "Bed")
-                    && _survival.UseSelected(spawnDirection)) { }
-                else if (item.EndsWith("Egg") && _inventory.ConsumeSelected())
+                    && _survival.UseSelected(_camera.GlobalPosition, direction)) { }
+                else if (item.EndsWith(" Egg"))
                 {
-                    bool spawned = item is "Chicken Egg" or "Cow Egg" or "Sheep Egg"
-                        ? GetNode<MobManager>("../MobManager").SpawnEgg(item.StartsWith("Cow") ? "Cow" : item.StartsWith("Sheep") ? "Sheep" : "Chicken", spawnDirection)
-                        : GetNode<NightMonsterManager>("../NightMonsterManager").SpawnEgg(item, spawnDirection);
-                    if (!spawned && !GameSession.IsCreative) _inventory.AddSelectedItem();
+                    TryUseSpawnEgg(item, _camera.GlobalPosition, direction);
                 }
                 else if (_inventory.SelectedBlockType >= 0 && _inventory.ConsumeSelected())
                 {
@@ -271,6 +268,28 @@ public partial class SphericalPlayer : CharacterBody3D
             _inventory.Refresh();
         }
     }
+
+    private bool TryUseSpawnEgg(string item, Vector3 origin, Vector3 direction)
+    {
+        float requiredHeight = item switch
+        {
+            "Cow Egg" => 1.3f,
+            "Sheep Egg" => 1.1f,
+            "Night Brute Egg" => 1.6f,
+            _ => 0.78f
+        };
+        if (!_planet.TryGetSurfaceObjectPlacement(origin, direction,
+            out Vector3 position, 0.1f, requiredHeight)) return false;
+        bool spawned = item is "Chicken Egg" or "Cow Egg" or "Sheep Egg"
+            ? GetNode<MobManager>("../MobManager").SpawnEggAt(
+                item.StartsWith("Cow") ? "Cow" : item.StartsWith("Sheep") ? "Sheep" : "Chicken", position)
+            : GetNode<NightMonsterManager>("../NightMonsterManager").SpawnEggAt(item, position);
+        if (spawned) _inventory.ConsumeSelected();
+        return spawned;
+    }
+
+    public bool TryUseSpawnEggForValidation(string item, Vector3 origin, Vector3 direction)
+        => TryUseSpawnEgg(item, origin, direction);
 
     public override void _PhysicsProcess(double deltaValue)
     {
@@ -662,7 +681,7 @@ public partial class SphericalPlayer : CharacterBody3D
         if (!GameSession.IsCreative) { _flying = false; _flightLabel.Visible = false; }
         if (GameSession.IsCreative) Health = 100f;
         UpdateHealthLabel();
-        _inventory.Refresh();
+        _inventory.OnGameModeChanged();
     }
 
     private void UpdateHealthLabel()
