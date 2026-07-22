@@ -653,6 +653,15 @@ public partial class HexPlanet : StaticBody3D
             var ring = new Vector3[orderedFaces.Length];
             for (int corner = 0; corner < orderedFaces.Length; corner++)
                 ring[corner] = centers[orderedFaces[corner]];
+            // The topological walk may choose either direction depending on
+            // the first edge. Rendering uses back-face culling and therefore
+            // requires every ring to be counter-clockwise from outside.
+            if (!IsCounterClockwiseFromOutside(normal, ring))
+            {
+                Array.Reverse(orderedFaces);
+                for (int corner = 0; corner < orderedFaces.Length; corner++)
+                    ring[corner] = centers[orderedFaces[corner]];
+            }
 
             _cellRings[cell] = ring;
             // CellGap is deliberately zero for both supported presets. Sharing
@@ -706,6 +715,14 @@ public partial class HexPlanet : StaticBody3D
             else sharedVertex = next.C;
         }
         return ordered;
+    }
+
+    private static bool IsCounterClockwiseFromOutside(Vector3 normal, Vector3[] ring)
+    {
+        if (ring.Length < 3) return false;
+        Vector3 first = ring[0] - normal * ring[0].Dot(normal);
+        Vector3 second = ring[1] - normal * ring[1].Dot(normal);
+        return first.Cross(second).Dot(normal) > 0f;
     }
 
     private void InitializeChunkStreaming()
@@ -978,16 +995,12 @@ public partial class HexPlanet : StaticBody3D
         return cliffCount > 0;
     }
 
-    public bool ValidateMountainCaveCeiling(out int forbiddenCaves)
+    public bool ValidateCellWinding(out int invalidCells)
     {
-        forbiddenCaves = 0;
-        if (_biomeTerrain?.Version < 3) return true;
+        invalidCells = 0;
         for (int cell = 0; cell < _cellLevels.Length; cell++)
-        {
-            for (int layer = 13; layer <= _cellLevels[cell] - 3; layer++)
-                if (IsBaseProceduralCave(cell, layer)) forbiddenCaves++;
-        }
-        return forbiddenCaves == 0;
+            if (!IsCounterClockwiseFromOutside(_vertices[cell], _cellRings[cell])) invalidCells++;
+        return invalidCells == 0;
     }
 
     private int SharedNeighbour(int cell, int firstFaceIndex, int secondFaceIndex)
@@ -1167,13 +1180,6 @@ public partial class HexPlanet : StaticBody3D
     {
         bool indev = GameSession.Current?.GenerationPreset == "Indev";
         int caveCeiling = indev ? _cellLevels[cell] - 3 : _cellLevels[cell] - 1;
-        // V3 mountains can rise more than eighty metres. Extending the cave
-        // field through that whole mass perforates every exposed cliff and
-        // turns distant ranges into Swiss cheese. Keep ordinary caves inside
-        // the playable crust; rare entrance shafts remain responsible for
-        // connecting a high surface to this underground network.
-        if (_biomeTerrain?.Version >= 3)
-            caveCeiling = Math.Min(caveCeiling, 12);
         if (layer < MinimumLayer + 1 || layer > caveCeiling) return false;
         Vector3 p = _vertices[cell];
         float seedOffset = Seed * 0.00137f;
