@@ -4,7 +4,8 @@ namespace HexaSphericalSandbox;
 
 public partial class Main : Node3D
 {
-    [Export(PropertyHint.Range, "30,1200,10")] public float DayLengthSeconds { get; set; } = 300.0f;
+    // One complete sunrise-to-sunrise cycle lasts 30 real-time minutes.
+    [Export(PropertyHint.Range, "60,3600,10")] public float DayLengthSeconds { get; set; } = 1800.0f;
 
     private DirectionalLight3D _sun = null!;
     private DirectionalLight3D _moon = null!;
@@ -23,8 +24,24 @@ public partial class Main : Node3D
     private float _stormBlend;
     private bool _exitSaveCompleted;
     private Vector3 _lastValidPlayerPosition;
+    private readonly SleepCoordinator _sleepCoordinator = new(new SoloSleepAdvanceRule());
+    public float GlobalDayAngle => _dayAngle;
+    public bool IsGlobalNight => Mathf.Sin(_dayAngle) < 0f;
 
     public void SetLocalStorm(bool storming) => _localStorm = storming;
+
+    public bool RequestSleep()
+    {
+        if (!IsGlobalNight) return false;
+        if (!_sleepCoordinator.RequestSleep()) return false;
+        // Canonical global dawn. This decision never depends on the requesting
+        // player's position or LocalHour.
+        _dayAngle = Mathf.Pi * 0.5f;
+        if (GameSession.Current is { } world) world.DayAngle = _dayAngle;
+        return true;
+    }
+
+    public void SetGlobalNightForValidation() => _dayAngle = Mathf.Pi * 1.5f;
 
     public void SaveAndReturnToMenu()
     {
@@ -36,7 +53,7 @@ public partial class Main : Node3D
 
     public override void _Ready()
     {
-        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha Indev");
+        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.4");
         var environment = new Environment
         {
             BackgroundMode = Environment.BGMode.Color,

@@ -19,6 +19,13 @@ public partial class SaveSystemTest : Node
             string root = ProjectSettings.GlobalizePath($"user://worlds/{world.Id}");
             Assert(File.Exists(Path.Combine(root, "world.save")), "initial world.save missing");
             Assert(world.GenerationPreset == "PreIndev", "generation preset was not stored");
+            Assert(world.TerrainGenerationVersion == 0, "PreIndev unexpectedly opted into biome terrain");
+            WorldData biomeWorld = WorldStore.Create("__biome_version_test__", "Creative", "Indev");
+            Assert(biomeWorld.TerrainGenerationVersion == IndevBiomeTerrain.CurrentVersion,
+                "new Indev world did not opt into the current biome generator");
+            Assert(WorldStore.Load(biomeWorld.Id).TerrainGenerationVersion == IndevBiomeTerrain.CurrentVersion,
+                "terrain generation version was not persisted");
+            WorldStore.Delete(biomeWorld);
 
             world.Health = 73f;
             world.RenderDistance = 52f;
@@ -37,6 +44,13 @@ public partial class SaveSystemTest : Node
             world.DestroyedTrees.Add(17);
             world.CollectedTwigs.Add(26);
             world.Campfires.Add([1f, 2f, 3f]);
+            world.Beds.Add([4f, 5f, 6f]);
+            world.RespawnBedPosition = [4f, 5f, 6f];
+            world.Mobs.Add(new MobSaveData
+            {
+                Id = "saved-sheep", Type = "Sheep", Position = [7f, 8f, 9f],
+                Sheared = true, WoolRegrowSeconds = 173f
+            });
             Assert(WorldStore.SaveAndFlush(world, TimeSpan.FromSeconds(8)), "generation 2 flush timed out");
             Assert(File.Exists(Path.Combine(root, "world.backup")), "world.backup missing after rotation");
 
@@ -69,7 +83,12 @@ public partial class SaveSystemTest : Node
                 && pickaxeUses == 2,
                 "slot inventory, crafting grid, or tool durability was not retained");
             Assert(loaded.DestroyedTrees.Contains(17) && loaded.CollectedTwigs.Contains(26)
-                && loaded.Campfires.Count == 1, "survival world objects were not retained");
+                && loaded.Campfires.Count == 1 && loaded.Beds.Count == 1
+                && loaded.RespawnBedPosition.Length == 3,
+                "survival world objects or bed respawn were not retained");
+            Assert(loaded.Mobs.Find(mob => mob.Id == "saved-sheep") is
+                { Type: "Sheep", Sheared: true, WoolRegrowSeconds: 173f },
+                "sheep wool state was not retained");
 
             // Destroy only the test world's primary candidate. Recovery must
             // select its valid backup rather than invent a new world/seed.

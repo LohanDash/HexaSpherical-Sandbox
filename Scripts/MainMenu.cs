@@ -18,7 +18,7 @@ public partial class MainMenu : Control
 
     public override void _Ready()
     {
-        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha Indev");
+        DisplayServer.WindowSetTitle("HexaSpherical Sandbox — Alpha 0.0.4");
         _worldList = GetNode<ItemList>("Center/Panel/Layout/Worlds");
         _name = GetNode<LineEdit>("Center/Panel/Layout/NewName");
         _mode = GetNode<OptionButton>("Center/Panel/Layout/Mode");
@@ -72,7 +72,10 @@ public partial class MainMenu : Control
     }
 
     private static string PresetLabel(WorldData world) =>
-        world.GenerationPreset == "Indev" ? "Alpha Indev (288 m)" : "PreIndev (36 m)";
+        world.GenerationPreset == "Indev"
+            ? world.TerrainGenerationVersion >= IndevBiomeTerrain.CurrentVersion
+                ? "Alpha Indev Biomes (288 m)" : "Alpha Indev Legacy (288 m)"
+            : "PreIndev (36 m)";
 
     private void LoadWorld()
     {

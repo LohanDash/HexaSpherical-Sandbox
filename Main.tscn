@@ -197,7 +197,7 @@ offset_left = 14.0
 offset_top = 10.0
 offset_right = 390.0
 offset_bottom = 98.0
-text = "HexaSpherical Sandbox — Alpha Indev\nF5: FPS / TPS / selfie   G: flashlight\nEsc: pause and settings   F10: save and quit"
+text = "HexaSpherical Sandbox — Alpha 0.0.4\nF5: FPS / TPS / selfie   G: flashlight\nEsc: pause and settings   F10: save and quit"
 
 [node name="Crosshair" type="Label" parent="HUD"]
 anchors_preset = 8

@@ -15,6 +15,7 @@ public partial class PlanetGenerationTest : Node
                 Id = "__planet_generation_test__",
                 Seed = 73421,
                 GenerationPreset = "Indev",
+                TerrainGenerationVersion = IndevBiomeTerrain.CurrentVersion,
                 Quality = "Low"
             };
             AddChild(new Node3D { Name = "Player", Position = Vector3.Up * 292f });

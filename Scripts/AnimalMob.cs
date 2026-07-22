@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Collections.Generic;
 
 namespace HexaSphericalSandbox;
 
@@ -28,26 +29,41 @@ public partial class AnimalMob : Node3D
     private bool _dying;
     private Node3D? _leftChickenLeg;
     private Node3D? _rightChickenLeg;
+    private bool _embeddedChickenLegsRemoved;
     private Vector3 _lastKnownPosition;
+    private bool _sheared;
+    private float _woolRegrowSeconds;
 
     public int CurrentChunk => _currentChunk;
-    public bool HasActiveWalkAnimation => MobType == "Cow"
+    public bool IsDying => _dying;
+    public bool HasActiveWalkAnimation => MobType is "Cow" or "Sheep"
         ? _animationPlayer?.IsPlaying() == true && _animationPlayer.CurrentAnimation.ToString().Contains("Walk")
         : _leftChickenLeg != null && _rightChickenLeg != null;
+    public int ProceduralLegCount => (_leftChickenLeg != null ? 1 : 0) + (_rightChickenLeg != null ? 1 : 0);
+    public bool HasExactlyOneVisibleLegSet => MobType is "Cow" or "Sheep"
+        ? ProceduralLegCount == 0 && HasActiveWalkAnimation
+        : _embeddedChickenLegsRemoved && ProceduralLegCount == 2;
+    public string LocomotionDebug => $"{MobType}: player={_animationPlayer != null}, playing={_animationPlayer?.IsPlaying()}, current={_animationPlayer?.CurrentAnimation}, animations={(_animationPlayer == null ? "none" : string.Join(',', _animationPlayer.GetAnimationList()))}";
 
-    public void Initialize(HexPlanet planet, string type, string? id = null)
+    public void Initialize(HexPlanet planet, string type, string? id = null,
+        bool sheared = false, float woolRegrowSeconds = 0f)
     {
         _planet = planet;
         MobType = type;
         if (!string.IsNullOrWhiteSpace(id)) MobId = id;
+        _sheared = type == "Sheep" && sheared;
+        _woolRegrowSeconds = Mathf.Max(0f, woolRegrowSeconds);
     }
 
     public override void _Ready()
     {
         if (_planet == null) _planet = GetNode<HexPlanet>("../../Planet");
-        string path = MobType == "Cow"
-            ? "res://Models/Mobs/PolyPizza/cow_quaternius.glb"
-            : "res://Models/Mobs/PolyPizza/chicken_jeremy.glb";
+        string path = MobType switch
+        {
+            "Cow" => "res://Models/Mobs/PolyPizza/cow_quaternius.glb",
+            "Sheep" => "res://Models/Mobs/PolyPizza/sheep_quaternius.glb",
+            _ => "res://Models/Mobs/PolyPizza/chicken_jeremy.glb"
+        };
         PackedScene? packedModel = GD.Load<PackedScene>(path);
         if (packedModel?.Instantiate<Node3D>() is Node3D visual)
         {
@@ -55,14 +71,16 @@ public partial class AnimalMob : Node3D
             // Source files use radically different units. These calibrated
             // scales produce a ~1.3 m cow and a ~1.0 m chicken. The former
             // gigantic values are archived in MOB_DIMENSIONS.json for bosses.
-            float scale = MobType == "Cow" ? 0.2525f : 0.00529f;
+            float scale = MobType is "Cow" or "Sheep" ? 0.2525f : 0.00529f;
             visual.Scale = Vector3.One * scale;
             // AI forward is -Z. The chicken source faces -X and the cow
             // source faces +Z, so each asset needs its own yaw correction.
-            visual.RotationDegrees = MobType == "Cow"
+            visual.RotationDegrees = MobType is "Cow" or "Sheep"
                 ? new Vector3(0f, 180f, 0f)
                 : new Vector3(0f, -90f, 0f);
-            visual.Position = Vector3.Up * (MobType == "Cow" ? 0.08f : 0.04f);
+            visual.Position = Vector3.Up * (MobType is "Cow" or "Sheep" ? 0.08f : 0.04f);
+            if (MobType == "Chicken")
+                _embeddedChickenLegsRemoved = RemoveEmbeddedChickenLegGeometry(visual);
             AddChild(visual);
             _modelLocalTransform = visual.Transform;
             visual.TopLevel = true;
@@ -74,8 +92,8 @@ public partial class AnimalMob : Node3D
             _previousVisualTransform = _currentVisualTransform;
         }
         AddCollisionBody();
-        _speed = MobType == "Cow" ? 0.55f : 0.8f;
-        _health = MobType == "Cow" ? 8f : 3f;
+        _speed = MobType switch { "Cow" => 0.55f, "Sheep" => 0.62f, _ => 0.8f };
+        _health = MobType switch { "Cow" => 8f, "Sheep" => 6f, _ => 3f };
         _movementAccumulator = (float)GD.RandRange(0.0, 0.1);
         PickHeading();
     }
@@ -83,6 +101,11 @@ public partial class AnimalMob : Node3D
     public override void _PhysicsProcess(double deltaValue)
     {
         if (_dying || !_streamed || !IsInstanceValid(_planet) || GlobalPosition.LengthSquared() < 1f) return;
+        if (_sheared && (_woolRegrowSeconds -= (float)deltaValue) <= 0f)
+        {
+            _sheared = false;
+            _woolRegrowSeconds = 0f;
+        }
         _damageReaction = Mathf.Max(0f, _damageReaction - (float)deltaValue);
         _walkPhase += (float)deltaValue * (MobType == "Cow" ? 5.5f : 9f);
         AnimateChickenLegs();
@@ -94,7 +117,7 @@ public partial class AnimalMob : Node3D
         }
         float delta = _movementAccumulator;
         _movementAccumulator = 0f;
-        if (_animationPlayer != null && MobType == "Cow")
+        if (_animationPlayer != null && MobType is "Cow" or "Sheep")
             _animationPlayer.SpeedScale = Mathf.Clamp(_speed / 0.55f, 0.65f, 1.35f);
         _previousVisualTransform = _currentVisualTransform;
         _decisionTimer -= delta;
@@ -176,10 +199,28 @@ public partial class AnimalMob : Node3D
         foreach (string animation in preferred)
         {
             if (!_animationPlayer.HasAnimation(animation)) continue;
-            _animationPlayer.Play(animation);
-            _animationPlayer.SpeedScale = MobType == "Cow" ? 1.15f : 1f;
+            StartLoopingAnimation(animation);
             return;
         }
+        // Some glTF exporters prefix the armature name more than once. Match
+        // the semantic suffix instead of coupling gameplay to that hierarchy.
+        foreach (StringName animation in _animationPlayer.GetAnimationList())
+        {
+            string name = animation.ToString();
+            if (!name.EndsWith("|Walk", StringComparison.OrdinalIgnoreCase)
+                && !name.EndsWith("|WalkSlow", StringComparison.OrdinalIgnoreCase)) continue;
+            StartLoopingAnimation(animation);
+            return;
+        }
+    }
+
+    private void StartLoopingAnimation(StringName animation)
+    {
+        if (_animationPlayer?.GetAnimation(animation) is Animation clip)
+            clip.LoopMode = Animation.LoopModeEnum.Linear;
+        _animationPlayer?.Play(animation);
+        if (_animationPlayer != null)
+            _animationPlayer.SpeedScale = MobType is "Cow" or "Sheep" ? 1.15f : 1f;
     }
 
     public bool TakeDamage(float amount)
@@ -192,11 +233,23 @@ public partial class AnimalMob : Node3D
         return _health <= 0f;
     }
 
+    public bool TryShear(out Vector3 dropPosition)
+    {
+        dropPosition = GlobalPosition + GlobalPosition.Normalized() * 0.45f;
+        if (MobType != "Sheep" || _dying || _sheared) return false;
+        _sheared = true;
+        _woolRegrowSeconds = 300f;
+        _damageReaction = 0.18f;
+        SoundManager.Play(SoundKind.Craft, -11f);
+        return true;
+    }
+
     public async void BeginDeath()
     {
         if (_dying) return;
         _dying = true;
         SetPhysicsProcess(false);
+        SetProcess(false);
         if (GetNodeOrNull<StaticBody3D>("AnimalCollision") is { } collision) collision.ProcessMode = ProcessModeEnum.Disabled;
         SoundManager.Play(SoundKind.MonsterDeath, -15f);
         if (_visual != null)
@@ -224,10 +277,62 @@ public partial class AnimalMob : Node3D
         AddChild(pivot);
         pivot.AddChild(new MeshInstance3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(0.055f, 0.28f, 0.055f), Material = material },
-            Position = Vector3.Down * 0.14f
+            Name = "Shin",
+            Mesh = new CylinderMesh
+            {
+                TopRadius = 0.025f, BottomRadius = 0.035f, Height = 0.25f,
+                RadialSegments = 5, Rings = 1, Material = material
+            },
+            Position = Vector3.Down * 0.125f
+        });
+        pivot.AddChild(new MeshInstance3D
+        {
+            Name = "Foot",
+            Mesh = new BoxMesh { Size = new Vector3(0.065f, 0.035f, 0.14f), Material = material },
+            Position = new Vector3(0f, -0.255f, -0.04f)
         });
         return pivot;
+    }
+
+    private static bool RemoveEmbeddedChickenLegGeometry(Node3D visual)
+    {
+        bool removedAny = false;
+        foreach (Node node in visual.FindChildren("*", "MeshInstance3D", true, false))
+        {
+            if (node is not MeshInstance3D meshInstance || meshInstance.Mesh is not Mesh source) continue;
+            var cleaned = new ArrayMesh();
+            for (int surface = 0; surface < source.GetSurfaceCount(); surface++)
+            {
+                Godot.Collections.Array arrays = source.SurfaceGetArrays(surface);
+                Vector3[] vertices = (Vector3[])arrays[(int)Mesh.ArrayType.Vertex];
+                int[] indices = (int[])arrays[(int)Mesh.ArrayType.Index];
+                if (indices.Length == 0)
+                {
+                    cleaned.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                    cleaned.SurfaceSetMaterial(cleaned.GetSurfaceCount() - 1, source.SurfaceGetMaterial(surface));
+                    continue;
+                }
+
+                var kept = new List<int>(indices.Length);
+                for (int index = 0; index + 2 < indices.Length; index += 3)
+                {
+                    int a = indices[index], b = indices[index + 1], c = indices[index + 2];
+                    // This asset is a single unrigged mesh. Inspection shows a
+                    // clean gap between its fused legs (Y <= 56) and body
+                    // (Y >= 110), so the threshold removes whole leg triangles
+                    // without cutting into the body.
+                    bool embeddedLeg = vertices[a].Y < 70f && vertices[b].Y < 70f && vertices[c].Y < 70f;
+                    if (embeddedLeg) { removedAny = true; continue; }
+                    kept.Add(a); kept.Add(b); kept.Add(c);
+                }
+                if (kept.Count == 0) continue;
+                arrays[(int)Mesh.ArrayType.Index] = kept.ToArray();
+                cleaned.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                cleaned.SurfaceSetMaterial(cleaned.GetSurfaceCount() - 1, source.SurfaceGetMaterial(surface));
+            }
+            meshInstance.Mesh = cleaned;
+        }
+        return removedAny;
     }
 
     private void AnimateChickenLegs()
@@ -240,8 +345,8 @@ public partial class AnimalMob : Node3D
 
     private void AddCollisionBody()
     {
-        float radius = MobType == "Cow" ? 0.46f : 0.25f;
-        float height = MobType == "Cow" ? 1.25f : 0.72f;
+        float radius = MobType switch { "Cow" => 0.46f, "Sheep" => 0.4f, _ => 0.25f };
+        float height = MobType switch { "Cow" => 1.25f, "Sheep" => 1.05f, _ => 0.72f };
         var body = new StaticBody3D { Name = "AnimalCollision" };
         body.AddChild(new CollisionShape3D
         {
@@ -265,6 +370,7 @@ public partial class AnimalMob : Node3D
     public MobSaveData Capture()
     {
         Vector3 p = IsInsideTree() ? GlobalPosition : _lastKnownPosition;
-        return new MobSaveData { Id = MobId, Type = MobType, Position = [p.X, p.Y, p.Z] };
+        return new MobSaveData { Id = MobId, Type = MobType, Position = [p.X, p.Y, p.Z],
+            Sheared = _sheared, WoolRegrowSeconds = _woolRegrowSeconds };
     }
 }

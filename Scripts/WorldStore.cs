@@ -16,6 +16,9 @@ public sealed class WorldData
     public string GameMode { get; set; } = "Creative";
     // Missing in legacy saves by design: deserialization keeps them Pre-Indev.
     public string GenerationPreset { get; set; } = "PreIndev";
+    // Zero means legacy generation. New Indev worlds explicitly opt into V2,
+    // preserving every existing save and its voxel coordinates.
+    public int TerrainGenerationVersion { get; set; }
     public int Seed { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
@@ -43,6 +46,8 @@ public sealed class WorldData
     public List<int> DestroyedTrees { get; set; } = [];
     public List<int> CollectedTwigs { get; set; } = [];
     public List<float[]> Campfires { get; set; } = [];
+    public List<float[]> Beds { get; set; } = [];
+    public float[] RespawnBedPosition { get; set; } = [];
     public List<MobSaveData> Mobs { get; set; } = [];
     public bool WeatherEnabled { get; set; } = true;
     public bool InterpolationEnabled { get; set; } = true;
@@ -63,6 +68,8 @@ public sealed class MobSaveData
     public string Id { get; set; } = "";
     public string Type { get; set; } = "Chicken";
     public float[] Position { get; set; } = [];
+    public bool Sheared { get; set; }
+    public float WoolRegrowSeconds { get; set; }
 }
 
 public static class GameSession
@@ -82,7 +89,8 @@ public static class WorldStore
         var world = new WorldData {
             Id = Guid.NewGuid().ToString("N"), Name = string.IsNullOrWhiteSpace(name) ? "New World" : name.Trim(),
             GameMode = mode, GenerationPreset = generationPreset,
-            Seed = Random.Shared.Next(1, int.MaxValue), SaveVersion = 6
+            TerrainGenerationVersion = generationPreset == "Indev" ? IndevBiomeTerrain.CurrentVersion : 0,
+            Seed = Random.Shared.Next(1, int.MaxValue), SaveVersion = 7
         };
         if (mode == "Survival") world.HexBlocks = 0;
         WorldSaveManager.Instance.Flush(world, TimeSpan.FromSeconds(8));

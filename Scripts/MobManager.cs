@@ -8,7 +8,14 @@ namespace HexaSphericalSandbox;
 public partial class MobManager : Node3D
 {
     public int MobCount => _mobs.Count;
+    public Vector3 FirstMobAimPosition => _mobs.Values.FirstOrDefault(IsInstanceValid) is { } mob
+        ? mob.GlobalPosition + mob.GlobalPosition.Normalized() * 0.65f : Vector3.Zero;
+    public Vector3 LastSpawnedMobAimPosition => _lastSpawnedMob is { } mob && IsInstanceValid(mob)
+        ? mob.GlobalPosition + mob.GlobalPosition.Normalized() * 0.65f : Vector3.Zero;
+    public int DyingSceneNodeCount => GetChildren().OfType<AnimalMob>().Count(mob => IsInstanceValid(mob) && mob.IsDying);
     public bool AllMobLocomotionReady => _mobs.Values.All(mob => !IsInstanceValid(mob) || mob.HasActiveWalkAnimation);
+    public bool AllMobLimbConfigurationsValid => _mobs.Values.All(mob => !IsInstanceValid(mob) || mob.HasExactlyOneVisibleLegSet);
+    public string LocomotionDebug => string.Join("; ", _mobs.Values.Where(IsInstanceValid).Select(mob => mob.LocomotionDebug));
     private const int MaximumMobs = 28;
     private const int MaximumMobsPerChunk = 5;
     private readonly Dictionary<string, AnimalMob> _mobs = [];
@@ -18,6 +25,7 @@ public partial class MobManager : Node3D
     private float _existingChunkAttempt = 7f;
     private float _streamingCheck;
     private SurvivalSystem _survival = null!;
+    private AnimalMob? _lastSpawnedMob;
 
     public override void _Ready()
     {
@@ -30,7 +38,8 @@ public partial class MobManager : Node3D
         foreach (MobSaveData saved in GameSession.Current?.Mobs ?? [])
         {
             if (saved.Position.Length != 3 || _mobs.Count >= MaximumMobs) continue;
-            Spawn(saved.Type, new Vector3(saved.Position[0], saved.Position[1], saved.Position[2]), saved.Id);
+            Spawn(saved.Type, new Vector3(saved.Position[0], saved.Position[1], saved.Position[2]), saved.Id,
+                saved.Sheared, saved.WoolRegrowSeconds);
         }
     }
 
@@ -85,7 +94,8 @@ public partial class MobManager : Node3D
         int remainingCapacity = MaximumMobsPerChunk - CountMobsInChunk(targetChunk);
         if (targetChunk < 0 || remainingCapacity <= 0) return;
 
-        string type = GD.Randf() < 0.58f ? "Chicken" : "Cow";
+        float speciesRoll = GD.Randf();
+        string type = speciesRoll < 0.44f ? "Chicken" : speciesRoll < 0.76f ? "Cow" : "Sheep";
         int groupSize = Math.Min(GD.Randf() < 0.58f ? 2 : 3, remainingCapacity);
         for (int member = 0; member < groupSize && _mobs.Count < MaximumMobs; member++)
         {
@@ -109,13 +119,15 @@ public partial class MobManager : Node3D
         return count;
     }
 
-    private void Spawn(string type, Vector3 position, string? id = null)
+    private void Spawn(string type, Vector3 position, string? id = null,
+        bool sheared = false, float woolRegrowSeconds = 0f)
     {
         var mob = new AnimalMob { Name = $"{type}_{_mobs.Count}" };
-        mob.Initialize(_planet, type, id);
+        mob.Initialize(_planet, type, id, sheared, woolRegrowSeconds);
         AddChild(mob);
         mob.PlaceAt(position);
         _mobs[mob.MobId] = mob;
+        _lastSpawnedMob = mob;
     }
 
     public bool SpawnEgg(string type, Vector3 direction)
@@ -139,12 +151,39 @@ public partial class MobManager : Node3D
             nearest = along; target = mob;
         }
         if (target == null) return false;
-        if (!target.TakeDamage(1f)) return true;
+        if (!target.TakeDamage(GameSession.IsCreative ? 100f : 1f)) return true;
         Vector3 drop = target.GlobalPosition + target.GlobalPosition.Normalized() * 0.25f;
-        string item = target.MobType == "Cow" ? "Raw Beef" : "Raw Chicken";
-        _survival.SpawnPickup(item, target.MobType == "Cow" ? 3 : 1, drop);
+        if (target.MobType == "Cow") _survival.SpawnPickup("Raw Beef", 3, drop);
+        else if (target.MobType == "Chicken") _survival.SpawnPickup("Raw Chicken", 1, drop);
         _mobs.Remove(target.MobId);
+        if (_lastSpawnedMob == target) _lastSpawnedMob = null;
         target.BeginDeath();
+        return true;
+    }
+
+    public bool TryShear(Vector3 origin, Vector3 direction) => TryShear(origin, direction, out _);
+
+    public bool TryShear(Vector3 origin, Vector3 direction, out bool woolProduced)
+    {
+        woolProduced = false;
+        direction = direction.Normalized();
+        AnimalMob? target = null;
+        float nearest = 5.2f;
+        foreach (AnimalMob mob in _mobs.Values)
+        {
+            if (!IsInstanceValid(mob) || !mob.Visible || mob.MobType != "Sheep") continue;
+            Vector3 toMob = mob.GlobalPosition + mob.GlobalPosition.Normalized() * 0.55f - origin;
+            float along = toMob.Dot(direction);
+            if (along < 0f || along >= nearest || (toMob - direction * along).Length() > 0.72f) continue;
+            nearest = along;
+            target = mob;
+        }
+        if (target == null) return false;
+        if (target.TryShear(out Vector3 dropPosition))
+        {
+            _survival.SpawnPickup("Wool", 3, dropPosition);
+            woolProduced = true;
+        }
         return true;
     }
 

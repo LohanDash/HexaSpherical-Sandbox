@@ -5,8 +5,10 @@ namespace HexaSphericalSandbox;
 
 public partial class StarlingFlock : Node3D
 {
-    private const int MaxBirdCount = 100;
-    private const int InitialBirdCount = 84;
+    // Keep one clearly visible murmuration around the player. One hundred birds
+    // remain inexpensive through MultiMesh and leave room for nest offspring.
+    private const int MaxBirdCount = 120;
+    private const int InitialBirdCount = 100;
     private const int NeighbourCount = 7;
     private const float TickInterval = 0.05f;
     private const float CruiseAltitude = 30f;
@@ -152,7 +154,9 @@ public partial class StarlingFlock : Node3D
         Vector3 desiredCentre = roosting > 0.7f ? roostCentre : (_nestTarget >= 0 ? nestDestination : dayCentre);
 
         _hawkCycle += delta;
-        bool hunting = Mathf.PosMod(_hawkCycle, 42f) < 17f && _main.Daylight > 0.18f;
+        // Predation is an occasional event, not the permanent state of the
+        // flock. This gives the birds long calm windows to regroup and nest.
+        bool hunting = Mathf.PosMod(_hawkCycle, 68f) < 7f && _main.Daylight > 0.18f;
         int attackedNest = hunting ? _nature.FindNearestNest(_hawkPosition) : -1;
         if (hunting && attackedNest < 0 && (_hawkTargetBird < 0 || _hawkTargetBird >= _activeBirdCount))
             _hawkTargetBird = NearestBirdTo(_hawkPosition);
@@ -234,8 +238,8 @@ public partial class StarlingFlock : Node3D
                     + orbitTangent * side * 4.5f;
             }
 
-            Vector3 acceleration = alignment * 1.7f + cohesion * 0.48f
-                + separation * 2.4f + (desiredCentre - flockCentre) * (_nestTarget >= 0 ? 2.4f : 0.32f)
+            Vector3 acceleration = alignment * 1.85f + cohesion * 0.82f
+                + separation * 2.05f + (desiredCentre - flockCentre) * (_nestTarget >= 0 ? 2.4f : 0.78f)
                 + altitudeWave * 1.15f + collectiveTurn + predatorEscape;
             acceleration = acceleration.LimitLength(9f);
             Vector3 velocity = _velocities[bird] + acceleration * delta;
@@ -247,7 +251,7 @@ public partial class StarlingFlock : Node3D
             if (hunting && hawkDistance < 0.42f && _eatCooldown <= 0f)
             {
                 caughtBird = bird;
-                _eatCooldown = 1.4f;
+                _eatCooldown = 12f;
                 break;
             }
         }
@@ -357,12 +361,17 @@ public partial class StarlingFlock : Node3D
     private void KillBird(int bird)
     {
         if (bird < 0 || bird >= _activeBirdCount) return;
-        int last = _activeBirdCount - 1;
-        _positions[bird] = _positions[last];
-        _previousPositions[bird] = _previousPositions[last];
-        _velocities[bird] = _velocities[last];
-        _nextVelocities[bird] = _nextVelocities[last];
-        _activeBirdCount = Math.Max(12, _activeBirdCount - 1);
+        // The ecosystem keeps its population: a caught bird is immediately
+        // materialised on the far side of the planet, as specified by the
+        // migration abstraction, then rejoins the flock naturally.
+        Vector3 opposite = -_player.GlobalPosition.Normalized();
+        Vector3 tangent = opposite.Cross(Mathf.Abs(opposite.Y) < 0.9f ? Vector3.Up : Vector3.Right).Normalized();
+        Vector3 side = opposite.Cross(tangent).Normalized();
+        _positions[bird] = opposite * (_planet.SurfaceRadius(opposite) + CruiseAltitude)
+            + tangent * (float)GD.RandRange(-4.0, 4.0) + side * (float)GD.RandRange(-4.0, 4.0);
+        _previousPositions[bird] = _positions[bird];
+        _velocities[bird] = tangent * 5.5f;
+        _nextVelocities[bird] = _velocities[bird];
         _hawkTargetBird = -1;
         SoundManager.Play(SoundKind.Hawk, -9f);
         SoundManager.Play(SoundKind.Hit, -14f);
@@ -372,9 +381,21 @@ public partial class StarlingFlock : Node3D
     public bool ValidateHawkCatch()
     {
         int before = _activeBirdCount;
-        if (before <= 12) return false;
+        Vector3 previous = _positions[0];
         KillBird(0);
-        return _activeBirdCount == before - 1;
+        return _activeBirdCount == before && _positions[0].DistanceTo(previous) > 20f;
+    }
+
+    public bool HasVisibleMurmurationForValidation()
+    {
+        if (_activeBirdCount < InitialBirdCount || _birdsAway > 20) return false;
+        Vector3 centre = Vector3.Zero;
+        for (int bird = 0; bird < _activeBirdCount - _birdsAway; bird++) centre += _positions[bird];
+        centre /= Math.Max(1, _activeBirdCount - _birdsAway);
+        int nearby = 0;
+        for (int bird = 0; bird < _activeBirdCount - _birdsAway; bird++)
+            if (_positions[bird].DistanceSquaredTo(centre) < 18f * 18f) nearby++;
+        return nearby >= 5;
     }
 
     public bool ValidateNestConstruction()

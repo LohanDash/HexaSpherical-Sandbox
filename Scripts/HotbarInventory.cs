@@ -7,8 +7,8 @@ namespace HexaSphericalSandbox;
 public partial class HotbarInventory : CanvasLayer
 {
     public static readonly string[] Catalog = ["Grass Block", "Dirt Block", "Stone Block", "Sand Block", "Snow Block", "Purple Block",
-        "Chicken Egg", "Cow Egg", "Night Crawler Egg", "Night Brute Egg", "Twig", "Stick", "Pebble", "Axe", "Primitive Pickaxe",
-        "Stone Pickaxe", "Stone Axe", "Wood", "Campfire", "Raw Beef", "Cooked Beef", "Raw Chicken", "Cooked Chicken"];
+        "Chicken Egg", "Cow Egg", "Sheep Egg", "Night Crawler Egg", "Night Brute Egg", "Twig", "Stick", "Pebble", "Axe", "Primitive Pickaxe",
+        "Stone Pickaxe", "Stone Axe", "Shears", "Wood", "Wool", "Campfire", "Bed", "Raw Beef", "Cooked Beef", "Raw Chicken", "Cooked Chicken"];
 
     private const int InventorySize = 27;
     private HBoxContainer _hotbar = null!;
@@ -198,15 +198,15 @@ public partial class HotbarInventory : CanvasLayer
         return total;
     }
 
-    public void AddItem(string item, int amount = 1)
+    public bool AddItem(string item, int amount = 1)
     {
-        if (amount <= 0 || string.IsNullOrWhiteSpace(item)) return;
+        if (amount <= 0 || string.IsNullOrWhiteSpace(item)) return false;
         bool stackable = !IsTool(item);
         if (stackable)
         {
             foreach (ItemSlotButton.SlotArea area in new[] { ItemSlotButton.SlotArea.Hotbar, ItemSlotButton.SlotArea.Inventory })
             for (int slot = 0; slot < AreaLength(area); slot++)
-                if (SlotItem(area, slot) == item) { SetSlot(area, slot, item, SlotCount(area, slot) + amount); Refresh(); return; }
+                if (SlotItem(area, slot) == item) { SetSlot(area, slot, item, SlotCount(area, slot) + amount); Refresh(); return true; }
         }
         foreach (ItemSlotButton.SlotArea area in new[] { ItemSlotButton.SlotArea.Hotbar, ItemSlotButton.SlotArea.Inventory })
         for (int slot = 0; slot < AreaLength(area); slot++)
@@ -215,8 +215,9 @@ public partial class HotbarInventory : CanvasLayer
             SetSlot(area, slot, item, amount);
             EnsureToolDurability(item);
             Refresh();
-            return;
+            return true;
         }
+        return false;
     }
 
     public bool RemoveItem(string item, int amount = 1)
@@ -411,6 +412,16 @@ public partial class HotbarInventory : CanvasLayer
         if (Match(["Pebble","Pebble","Pebble", null,"Stick",null, null,"Stick",null])) return "Primitive Pickaxe";
         if (Match(["Stone Block","Stone Block","Stone Block", null,"Stick",null, null,"Stick",null])) return "Stone Pickaxe";
         if (Match(["Stone Block","Stone Block",null, "Stone Block","Stick",null, null,"Stick",null])) return "Stone Axe";
+        int stones = 0, sticks = 0, occupied = 0;
+        for (int slot = 0; slot < 9; slot++)
+        {
+            if (World.CraftSlotCounts[slot] <= 0) continue;
+            occupied++;
+            if (World.CraftSlotItems[slot] == "Stone Block") stones++;
+            if (World.CraftSlotItems[slot] == "Stick") sticks++;
+        }
+        if (occupied == 3 && stones == 2 && sticks == 1) return "Shears";
+        if (Match([null,null,null, "Wool","Wool","Wool", "Wood","Wood","Wood"])) return "Bed";
         string?[] campfire = ["Wood","Wood","Wood", "Wood",null,"Wood", "Wood","Wood","Wood"];
         return Match(campfire) ? "Campfire" : null;
     }
@@ -513,14 +524,14 @@ public partial class HotbarInventory : CanvasLayer
     {
         if (IsTool(item) && !World.ToolDurability.ContainsKey(item)) World.ToolDurability[item] = MaxDurability(item);
     }
-    private static bool IsTool(string item) => item is "Axe" or "Primitive Pickaxe" or "Stone Pickaxe" or "Stone Axe";
+    private static bool IsTool(string item) => item is "Axe" or "Primitive Pickaxe" or "Stone Pickaxe" or "Stone Axe" or "Shears";
     private static T[] Resize<T>(T[]? source, int length)
     {
         T[] result = new T[length];
         if (source != null) Array.Copy(source, result, Math.Min(source.Length, length));
         return result;
     }
-    private static int MaxDurability(string item) => item switch { "Primitive Pickaxe" => 4, "Stone Pickaxe" or "Stone Axe" => 128, "Axe" => 12, _ => 1 };
+    private static int MaxDurability(string item) => item switch { "Primitive Pickaxe" => 4, "Stone Pickaxe" or "Stone Axe" => 128, "Shears" => 64, "Axe" => 12, _ => 1 };
     private static string Short(string item) => item.Replace(" Block", "").Replace("Primitive ", "P.").Replace("Stone ", "S.").Replace("Night ", "N.").Replace(" Egg", "Egg");
     private static Color ItemColor(string item)
     {
@@ -529,11 +540,13 @@ public partial class HotbarInventory : CanvasLayer
         return item switch
         {
             "Axe" or "Primitive Pickaxe" => new Color(0.58f, 0.56f, 0.48f),
-            "Stone Pickaxe" or "Stone Axe" => new Color(0.48f, 0.52f, 0.56f),
+            "Stone Pickaxe" or "Stone Axe" or "Shears" => new Color(0.48f, 0.52f, 0.56f),
             "Pebble" => new Color(0.5f, 0.52f, 0.55f),
             "Raw Beef" or "Raw Chicken" => new Color(0.72f, 0.18f, 0.16f),
             "Cooked Beef" or "Cooked Chicken" => new Color(0.55f, 0.25f, 0.08f),
             "Wood" or "Twig" or "Stick" or "Campfire" => new Color(0.48f, 0.28f, 0.1f),
+            "Wool" => new Color(0.92f, 0.92f, 0.88f),
+            "Bed" => new Color(0.72f, 0.12f, 0.12f),
             _ => new Color(0.65f, 0.35f, 0.12f)
         };
     }

@@ -19,6 +19,8 @@ public partial class PauseMenuTest : Node
             };
             Node main = GD.Load<PackedScene>("res://Main.tscn").Instantiate();
             AddChild(main);
+            if (main is not Main gameMain || !Mathf.IsEqualApprox(gameMain.DayLengthSeconds, 1800f))
+                throw new InvalidOperationException("The full day/night cycle is not exactly 30 real-time minutes.");
             for (int frame = 0; frame < 24; frame++)
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
@@ -47,9 +49,12 @@ public partial class PauseMenuTest : Node
                 throw new InvalidOperationException("Passive spawn egg failed.");
             if (!mobs.SpawnEgg("Cow", Vector3.Up))
                 throw new InvalidOperationException("Cow spawn failed.");
-            await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+            for (int frame = 0; frame < 12 && !mobs.AllMobLocomotionReady; frame++)
+                await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
             if (!mobs.AllMobLocomotionReady)
                 throw new InvalidOperationException("Cow/chicken locomotion animation is not active.");
+            if (!mobs.AllMobLimbConfigurationsValid)
+                throw new InvalidOperationException("An animal has duplicated, missing or non-animated legs.");
             if (!monsters.SpawnEgg("Night Crawler Egg", Vector3.Up))
                 throw new InvalidOperationException("Hostile spawn egg failed.");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -62,14 +67,16 @@ public partial class PauseMenuTest : Node
                 || monsters.EggMonsterCount != 0)
                 throw new InvalidOperationException("Hostile monster targeting or death failed.");
 
+            if (!flock.HasVisibleMurmurationForValidation())
+                throw new InvalidOperationException("The starling population did not form a visible group of at least five birds.");
             if (!flock.ValidateNestConstruction())
                 throw new InvalidOperationException("Two starlings failed to build and persist a nest.");
             float twigRatio = nature.TwigEligibleRatioForValidation();
             if (twigRatio < 0.75f || twigRatio > 0.85f || !nature.ValidateTwigRegrowth())
                 throw new InvalidOperationException($"Twig availability/regrowth is invalid: {twigRatio:P0} eligible.");
             int birdsBeforeHawk = flock.BirdCount;
-            if (!flock.ValidateHawkCatch() || flock.BirdCount != birdsBeforeHawk - 1)
-                throw new InvalidOperationException("The hawk failed to kill a starling.");
+            if (!flock.ValidateHawkCatch() || flock.BirdCount != birdsBeforeHawk)
+                throw new InvalidOperationException("A hawk catch did not rematerialise the starling across the planet.");
 
             Input.ParseInputEvent(new InputEventKey { Keycode = Key.Escape, Pressed = true });
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -90,9 +97,12 @@ public partial class PauseMenuTest : Node
             int dragSourceSlot = inventory.FindItemSlotForValidation(ItemSlotButton.SlotArea.Hotbar, "Grass Block");
             Vector2 dragSource = inventory.SlotCenterForValidation(ItemSlotButton.SlotArea.Hotbar, dragSourceSlot);
             Vector2 dragTarget = inventory.SlotCenterForValidation(ItemSlotButton.SlotArea.Inventory, 5);
-            Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true, Position = dragSource });
-            Input.ParseInputEvent(new InputEventMouseMotion { Position = dragTarget, Relative = dragTarget - dragSource });
-            Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false, Position = dragTarget });
+            // Call the same runtime input handler directly. Headless Godot can
+            // consume synthetic pointer events in the GUI viewport before they
+            // reach CanvasLayer._Input, which made this regression test flaky.
+            inventory._Input(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true, Position = dragSource });
+            inventory._Input(new InputEventMouseMotion { Position = dragTarget, Relative = dragTarget - dragSource });
+            inventory._Input(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false, Position = dragTarget });
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             if (inventory.SlotCount(ItemSlotButton.SlotArea.Hotbar, dragSourceSlot) != 0
                 || inventory.SlotCount(ItemSlotButton.SlotArea.Inventory, 5) != 1)

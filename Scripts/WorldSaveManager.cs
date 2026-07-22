@@ -320,7 +320,8 @@ public sealed class WorldSaveManager
     {
         SaveVersion = source.SaveVersion, SaveGeneration = source.SaveGeneration, Id = source.Id,
         Name = source.Name, GameMode = source.GameMode,
-        GenerationPreset = source.GenerationPreset, Seed = source.Seed,
+        GenerationPreset = source.GenerationPreset, TerrainGenerationVersion = source.TerrainGenerationVersion,
+        Seed = source.Seed,
         CreatedUtc = source.CreatedUtc, UpdatedUtc = source.UpdatedUtc,
         PlayerPosition = [.. source.PlayerPosition], RemovedVoxels = [.. source.RemovedVoxels],
         PlacedVoxels = [.. source.PlacedVoxels], DayAngle = source.DayAngle, Health = source.Health,
@@ -335,8 +336,11 @@ public sealed class WorldSaveManager
         InventoryItems = source.InventoryItems.ToDictionary(pair => pair.Key, pair => pair.Value),
         DestroyedTrees = [.. source.DestroyedTrees], CollectedTwigs = [.. source.CollectedTwigs],
         Campfires = source.Campfires.Select(position => position.ToArray()).ToList(),
+        Beds = source.Beds.Select(position => position.ToArray()).ToList(),
+        RespawnBedPosition = [.. source.RespawnBedPosition],
         Mobs = source.Mobs.Select(mob => new MobSaveData
-            { Id = mob.Id, Type = mob.Type, Position = [.. mob.Position] }).ToList(),
+            { Id = mob.Id, Type = mob.Type, Position = [.. mob.Position],
+                Sheared = mob.Sheared, WoolRegrowSeconds = mob.WoolRegrowSeconds }).ToList(),
         WeatherEnabled = source.WeatherEnabled, InterpolationEnabled = source.InterpolationEnabled,
         PlantPopulation = source.PlantPopulation,
         InsectPopulation = source.InsectPopulation, BirdPopulation = source.BirdPopulation,

@@ -1,4 +1,4 @@
-# HexaSpherical Sandbox — Alpha Indev
+# HexaSpherical Sandbox — Alpha 0.0.4
 
 An early Godot 4 C# prototype featuring a procedurally generated spherical planet
 tiled with hexagonal cells and 12 structural pentagons.
@@ -73,7 +73,7 @@ Block metadata is centralized with stable IDs, colours, names, and reserved text
 paths under `Textures/Blocks/`, preparing both terrain rendering and inventory icons
 for future texture assets without changing the save format.
 
-A full day/night cycle lasts five minutes by default. Local time also depends on
+A full day/night cycle lasts thirty minutes by default. Local time also depends on
 the player's position on the planet, so travelling around the globe naturally
 moves the sun and moon across the sky.
 
@@ -86,8 +86,8 @@ recovery from `world.save`, `world.tmp`, or `world.backup`.
 
 ## Living ecosystem
 
-Cows and chickens inhabit loaded terrain chunks. Starling murmurations react to an
-aerial predator, weather moves around the spherical planet, and nocturnal wildlife
+Cows, chickens, and sheep inhabit loaded terrain chunks. Large starling murmurations
+regroup between occasional aerial-predator attacks, weather moves around the spherical planet, and nocturnal wildlife
 appears after dark. Entity populations and important ecosystem state are saved with
 the world, while distant chunks remain unloaded for performance.
 

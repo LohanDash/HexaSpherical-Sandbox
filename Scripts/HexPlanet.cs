@@ -25,6 +25,8 @@ public partial class HexPlanet : StaticBody3D
     private Vector3[][] _cellDirections = [];
     private int[][] _cellNeighbors = [];
     private int[] _cellLevels = [];
+    private TerrainBiome[] _cellBiomes = [];
+    private IndevBiomeTerrain? _biomeTerrain;
     private readonly HashSet<long> _removedVoxels = [];
     private readonly HashSet<long> _playerRemovedVoxels = [];
     private readonly HashSet<long> _playerPlacedVoxels = [];
@@ -34,6 +36,7 @@ public partial class HexPlanet : StaticBody3D
     private const int CellsPerChunk = 64;
     private readonly Dictionary<int, MeshInstance3D> _chunkMeshes = [];
     private readonly Dictionary<int, CollisionShape3D> _chunkCollisions = [];
+    private readonly Dictionary<int, VoxelTriangle[]> _chunkHitTriangles = [];
     private StandardMaterial3D _terrainMaterial = null!;
     private const int BlockAtlasTileSize = 16;
     private readonly Queue<(int Chunk, int Lod)> _pendingChunks = [];
@@ -52,8 +55,15 @@ public partial class HexPlanet : StaticBody3D
     public float GenerationProgress { get; private set; }
     public int PhysicsChunkCount => _chunkCollisions.Count;
     public int LastBrokenBlockType { get; private set; }
-    private float CellSelectionRadius => Radius * 0.92f / (1 << Subdivisions);
+    public int LastEditedCell { get; private set; } = -1;
+    public int LastEditedLayer { get; private set; }
     private float StoneHeightThreshold => Radius > 100f ? 18f : 1.25f;
+
+    public enum VoxelFace { Top, Bottom, Side }
+    public readonly record struct VoxelRayHit(int Cell, int Layer, VoxelFace Face,
+        int SideEdge, float Distance, Vector3 Position);
+    private readonly record struct VoxelTriangle(Vector3 A, Vector3 B, Vector3 C,
+        Vector3 Normal, int Cell, int Layer, VoxelFace Face, int SideEdge);
 
     public override void _Ready()
     {
@@ -64,6 +74,8 @@ public partial class HexPlanet : StaticBody3D
             Radius = indevPlanet ? 288f : 36f;
             Subdivisions = indevPlanet ? 7 : 5;
             Relief = indevPlanet ? 22f : 2.8f;
+            if (indevPlanet && GameSession.Current.TerrainGenerationVersion >= IndevBiomeTerrain.CurrentVersion)
+                _biomeTerrain = new IndevBiomeTerrain(Seed);
             // Dual-cell borders are shared exactly. Any positive inset creates
             // visible cracks, so both presets deliberately remain gapless.
             CellGap = 0f;
@@ -144,6 +156,22 @@ public partial class HexPlanet : StaticBody3D
     {
         int cell = ClosestCell(direction.Normalized());
         return _cellLevels[cell] * BlockHeight < -0.45f;
+    }
+
+    public TerrainBiome BiomeAt(Vector3 direction)
+    {
+        if (_biomeTerrain == null) return TerrainBiome.Plains;
+        if (_cellBiomes.Length == _vertices.Count && _cellNeighbors.Length == _vertices.Count)
+            return _cellBiomes[ClosestCell(direction.Normalized())];
+        return _biomeTerrain.Sample(direction).Biome;
+    }
+
+    public TerrainBiomeSample TerrainSampleAt(Vector3 direction)
+    {
+        if (_biomeTerrain != null) return _biomeTerrain.Sample(direction);
+        float height = LegacyGeneratedHeightAt(direction.Normalized());
+        return new TerrainBiomeSample(TerrainBiome.Plains, 1f, 0f, 0f, height,
+            LegacyNaturalBlockType(direction.Normalized(), height), 0.082f);
     }
 
     public Vector3 PassiveMobSurfacePosition(Vector3 direction, float clearance = 0.08f)
@@ -264,44 +292,16 @@ public partial class HexPlanet : StaticBody3D
 
     public bool TryEdit(Vector3 rayOrigin, Vector3 rayDirection, int levelDelta, int blockType = 0)
     {
-        int bestCell = -1;
-        int bestLayer = 0;
-        int bestAxialFace = 0;
-        int bestSideEdge = -1;
-        float bestDistance = float.MaxValue;
-        float selectionRadius = CellSelectionRadius;
-        rayDirection = rayDirection.Normalized();
-
-        foreach (int chunk in _generatedChunks)
-        {
-            if (_chunkLods.GetValueOrDefault(chunk, 1) != 0) continue;
-            foreach (int cell in _chunkCells[chunk])
-            {
-                Vector3 normal = _vertices[cell];
-                for (int layer = MinimumLayer; layer <= _cellLevels[cell]; layer++)
-                {
-                    if (!IsOccupied(cell, layer)) continue;
-                    if (RayIntersectsVoxel(rayOrigin, rayDirection, cell, layer, selectionRadius,
-                        out float distance, out int axialFace, out int sideEdge)
-                        && distance <= 9f && distance < bestDistance)
-                    {
-                        bestDistance = distance;
-                        bestCell = cell;
-                        bestLayer = layer;
-                        bestAxialFace = axialFace;
-                        bestSideEdge = sideEdge;
-                    }
-                }
-            }
-        }
-
-        if (bestCell < 0) return false;
+        if (!TryGetVoxelRayHit(rayOrigin, rayDirection, out VoxelRayHit hit, 9f)) return false;
+        int bestCell = hit.Cell;
+        int bestLayer = hit.Layer;
         int editedCell = bestCell;
         int editedLayer = bestLayer;
         if (levelDelta < 0)
         {
             long key = VoxelKey(bestCell, bestLayer);
-            LastBrokenBlockType = _placedVoxelTypes.GetValueOrDefault(key, NaturalBlockType(_vertices[bestCell], bestLayer * BlockHeight));
+            LastBrokenBlockType = _placedVoxelTypes.GetValueOrDefault(key,
+                NaturalBlockType(bestCell, bestLayer, _vertices[bestCell], bestLayer * BlockHeight));
             _removedVoxels.Add(key);
             _playerRemovedVoxels.Add(key);
             _playerPlacedVoxels.Remove(key);
@@ -311,9 +311,9 @@ public partial class HexPlanet : StaticBody3D
         {
             int placementCell = bestCell;
             int placementLayer = bestLayer;
-            if (bestAxialFace > 0) placementLayer++;
-            else if (bestAxialFace < 0) placementLayer--;
-            else if (bestSideEdge >= 0) placementCell = _cellNeighbors[bestCell][bestSideEdge];
+            if (hit.Face == VoxelFace.Top) placementLayer++;
+            else if (hit.Face == VoxelFace.Bottom) placementLayer--;
+            else if (hit.SideEdge >= 0) placementCell = _cellNeighbors[bestCell][hit.SideEdge];
             if (placementCell < 0 || placementLayer < MinimumLayer || placementLayer > MaximumLayer
                 || IsOccupied(placementCell, placementLayer) || WouldOverlapPlayer(placementCell, placementLayer)) return false;
             editedCell = placementCell;
@@ -325,6 +325,8 @@ public partial class HexPlanet : StaticBody3D
             _placedVoxelTypes[key] = Mathf.Clamp(blockType, 0, 5);
             _cellLevels[placementCell] = Math.Max(_cellLevels[placementCell], placementLayer);
         }
+        LastEditedCell = editedCell;
+        LastEditedLayer = editedLayer;
         int editedChunk = _cellToChunk[editedCell];
         RebuildChunk(editedChunk, 0);
         _generatedChunks.Add(editedChunk);
@@ -348,124 +350,97 @@ public partial class HexPlanet : StaticBody3D
 
     public float GetRayHitDistance(Vector3 rayOrigin, Vector3 rayDirection, float maximumDistance = 18.0f)
     {
-        float bestDistance = maximumDistance;
-        float selectionRadius = CellSelectionRadius;
-        rayDirection = rayDirection.Normalized();
-        foreach (int chunk in _generatedChunks)
-        {
-            if (_chunkLods.GetValueOrDefault(chunk, 1) != 0) continue;
-            foreach (int cell in _chunkCells[chunk])
-            {
-                Vector3 normal = _vertices[cell];
-                for (int layer = MinimumLayer; layer <= _cellLevels[cell]; layer++)
-                {
-                    if (!IsOccupied(cell, layer)) continue;
-                    if (RayIntersectsVoxel(rayOrigin, rayDirection, cell, layer, selectionRadius,
-                        out float distance, out _, out _) && distance < bestDistance)
-                        bestDistance = distance;
-                }
-            }
-        }
-        return bestDistance;
+        return TryGetVoxelRayHit(rayOrigin, rayDirection, out VoxelRayHit hit, maximumDistance)
+            ? hit.Distance : maximumDistance;
     }
 
     public bool TryGetTargetBlockType(Vector3 rayOrigin, Vector3 rayDirection, out int blockType, float maximumDistance = 9f)
     {
+        if (!TryGetVoxelRayHit(rayOrigin, rayDirection, out VoxelRayHit hit, maximumDistance))
+        { blockType = -1; return false; }
+        long key = VoxelKey(hit.Cell, hit.Layer);
+        blockType = _placedVoxelTypes.GetValueOrDefault(key,
+            NaturalBlockType(hit.Cell, hit.Layer, _vertices[hit.Cell], hit.Layer * BlockHeight));
+        return true;
+    }
+
+    public bool TryGetVoxelRayHit(Vector3 origin, Vector3 direction, out VoxelRayHit hit,
+        float maximumDistance = 9f)
+    {
+        hit = default;
+        if (direction.LengthSquared() < 0.000001f) return false;
+        direction = direction.Normalized();
         float nearest = maximumDistance;
-        int nearestCell = -1;
-        int nearestLayer = 0;
-        float selectionRadius = CellSelectionRadius;
-        rayDirection = rayDirection.Normalized();
+        float bestFacing = float.NegativeInfinity;
+        VoxelTriangle best = default;
+        bool found = false;
         foreach (int chunk in _generatedChunks)
         {
-            if (_chunkLods.GetValueOrDefault(chunk, 1) != 0) continue;
-            foreach (int cell in _chunkCells[chunk])
-            for (int layer = MinimumLayer; layer <= _cellLevels[cell]; layer++)
+            if (_chunkLods.GetValueOrDefault(chunk, 1) != 0
+                || !_chunkHitTriangles.TryGetValue(chunk, out VoxelTriangle[]? triangles)) continue;
+            foreach (VoxelTriangle triangle in triangles)
             {
-                if (!IsOccupied(cell, layer)) continue;
-                if (!RayIntersectsVoxel(rayOrigin, rayDirection, cell, layer, selectionRadius,
-                    out float distance, out _, out _) || distance >= nearest) continue;
-                nearest = distance;
-                nearestCell = cell;
-                nearestLayer = layer;
+                if (!RayIntersectsTriangle(origin, direction, triangle, out float distance)
+                    || distance > maximumDistance) continue;
+                float facing = -direction.Dot(triangle.Normal);
+                if (distance < nearest - 0.0001f
+                    || (Mathf.Abs(distance - nearest) <= 0.0001f && facing > bestFacing))
+                {
+                    nearest = distance;
+                    bestFacing = facing;
+                    best = triangle;
+                    found = true;
+                }
             }
         }
-        if (nearestCell < 0) { blockType = -1; return false; }
-        long key = VoxelKey(nearestCell, nearestLayer);
-        blockType = _placedVoxelTypes.GetValueOrDefault(key,
-            NaturalBlockType(_vertices[nearestCell], nearestLayer * BlockHeight));
+        if (!found) return false;
+        hit = new VoxelRayHit(best.Cell, best.Layer, best.Face, best.SideEdge,
+            nearest, origin + direction * nearest);
         return true;
     }
 
-    private bool RayIntersectsVoxel(Vector3 origin, Vector3 direction, int cell, int layer,
-        float radius, out float distance, out int axialFace, out int sideEdge)
+    private static bool RayIntersectsTriangle(Vector3 origin, Vector3 direction,
+        VoxelTriangle triangle, out float distance)
     {
-        Vector3 normal = _vertices[cell];
-        Vector3 center = normal * (Radius + (layer - 0.5f) * BlockHeight);
-        Vector3 relative = origin - center;
-        float axialOrigin = relative.Dot(normal);
-        float axialDirection = direction.Dot(normal);
-        float halfHeight = BlockHeight * 0.5f;
-        float axialEnter = float.NegativeInfinity, axialExit = float.PositiveInfinity;
-        if (Mathf.Abs(axialDirection) < 0.00001f)
-        {
-            if (Mathf.Abs(axialOrigin) > halfHeight) { distance = 0; axialFace = 0; sideEdge = -1; return false; }
-        }
-        else
-        {
-            float a = (-halfHeight - axialOrigin) / axialDirection;
-            float b = ( halfHeight - axialOrigin) / axialDirection;
-            axialEnter = Math.Min(a, b); axialExit = Math.Max(a, b);
-        }
-
-        Vector3 tangentOrigin = relative - normal * axialOrigin;
-        Vector3 tangentDirection = direction - normal * axialDirection;
-        float quadraticA = tangentDirection.LengthSquared();
-        float cylinderEnter = float.NegativeInfinity, cylinderExit = float.PositiveInfinity;
-        if (quadraticA < 0.000001f)
-        {
-            if (tangentOrigin.LengthSquared() > radius * radius) { distance = 0; axialFace = 0; sideEdge = -1; return false; }
-        }
-        else
-        {
-            float quadraticB = 2f * tangentOrigin.Dot(tangentDirection);
-            float quadraticC = tangentOrigin.LengthSquared() - radius * radius;
-            float discriminant = quadraticB * quadraticB - 4f * quadraticA * quadraticC;
-            if (discriminant < 0f) { distance = 0; axialFace = 0; sideEdge = -1; return false; }
-            float root = Mathf.Sqrt(discriminant);
-            cylinderEnter = (-quadraticB - root) / (2f * quadraticA);
-            cylinderExit = (-quadraticB + root) / (2f * quadraticA);
-        }
-        float enter = Math.Max(axialEnter, cylinderEnter);
-        float exit = Math.Min(axialExit, cylinderExit);
-        if (exit < Math.Max(enter, 0.05f)) { distance = 0; axialFace = 0; sideEdge = -1; return false; }
-        bool startedInside = enter < 0.05f;
-        distance = startedInside ? exit : enter;
-        // When the camera is close enough to start inside the selection
-        // volume, use the boundary being exited instead of the entry face.
-        bool axial = startedInside
-            ? axialExit <= cylinderExit + 0.0001f
-            : axialEnter >= cylinderEnter - 0.0001f;
-        Vector3 hit = origin + direction * distance;
-        axialFace = axial ? (hit.Dot(normal) > center.Dot(normal) ? 1 : -1) : 0;
-        sideEdge = axial ? -1 : ClosestEdge(cell, hit - normal * hit.Dot(normal));
-        return true;
+        const float epsilon = 0.000001f;
+        Vector3 edge1 = triangle.B - triangle.A;
+        Vector3 edge2 = triangle.C - triangle.A;
+        Vector3 cross = direction.Cross(edge2);
+        float determinant = edge1.Dot(cross);
+        if (Mathf.Abs(determinant) < epsilon) { distance = 0f; return false; }
+        float inverse = 1f / determinant;
+        Vector3 relative = origin - triangle.A;
+        float u = relative.Dot(cross) * inverse;
+        if (u < -epsilon || u > 1f + epsilon) { distance = 0f; return false; }
+        Vector3 q = relative.Cross(edge1);
+        float v = direction.Dot(q) * inverse;
+        if (v < -epsilon || u + v > 1f + epsilon) { distance = 0f; return false; }
+        distance = edge2.Dot(q) * inverse;
+        return distance >= 0f;
     }
 
-    private int ClosestEdge(int cell, Vector3 tangentHit)
+    public bool TryGetInteractionTriangleSample(VoxelFace face, bool nearEdge,
+        out Vector3 origin, out Vector3 direction, out VoxelRayHit expected)
     {
-        Vector3 normal = _vertices[cell];
-        Vector3 hitDirection = tangentHit.Normalized();
-        int best = 0; float bestDot = float.NegativeInfinity;
-        Vector3[] ring = _cellDirections[cell];
-        for (int edge = 0; edge < ring.Length; edge++)
+        foreach (VoxelTriangle[] triangles in _chunkHitTriangles.Values)
+        foreach (VoxelTriangle triangle in triangles)
         {
-            Vector3 midpoint = (ring[edge] + ring[(edge + 1) % ring.Length]).Normalized();
-            Vector3 tangent = (midpoint - normal * midpoint.Dot(normal)).Normalized();
-            float dot = tangent.Dot(hitDirection);
-            if (dot > bestDot) { bestDot = dot; best = edge; }
+            if (triangle.Face != face) continue;
+            Vector3 point = nearEdge
+                ? triangle.A * 0.02f + triangle.B * 0.49f + triangle.C * 0.49f
+                : (triangle.A + triangle.B + triangle.C) / 3f;
+            direction = -triangle.Normal.Normalized();
+            // Stay just outside this face: a long side-facing test ray could
+            // legitimately cross another raised column first on a curved world.
+            const float sampleDistance = 0.08f;
+            origin = point - direction * sampleDistance;
+            expected = new VoxelRayHit(triangle.Cell, triangle.Layer, triangle.Face,
+                triangle.SideEdge, sampleDistance, point);
+            return true;
         }
-        return best;
+        origin = direction = Vector3.Zero;
+        expected = default;
+        return false;
     }
 
     private bool WouldOverlapPlayer(int cell, int layer)
@@ -554,11 +529,16 @@ public partial class HexPlanet : StaticBody3D
         _cellRings = new Vector3[_vertices.Count][];
         _cellDirections = new Vector3[_vertices.Count][];
         _cellNeighbors = new int[_vertices.Count][];
+        _cellBiomes = new TerrainBiome[_vertices.Count];
         if (_cellLevels.Length != _vertices.Count)
         {
             _cellLevels = new int[_vertices.Count];
             for (int cell = 0; cell < _vertices.Count; cell++)
-                _cellLevels[cell] = Mathf.Clamp(Mathf.RoundToInt(GeneratedHeightAt(_vertices[cell]) / BlockHeight), MinimumLayer, MaximumLayer);
+            {
+                TerrainBiomeSample sample = TerrainSampleAt(_vertices[cell]);
+                _cellBiomes[cell] = sample.Biome;
+                _cellLevels[cell] = Mathf.Clamp(Mathf.RoundToInt(sample.Height / BlockHeight), MinimumLayer, MaximumLayer);
+            }
             GenerateCaves();
             ApplySavedVoxelChanges();
         }
@@ -666,6 +646,7 @@ public partial class HexPlanet : StaticBody3D
                 {
                     if (_chunkMeshes.Remove(chunk, out MeshInstance3D? mesh)) mesh.QueueFree();
                     if (_chunkCollisions.Remove(chunk, out CollisionShape3D? collision)) collision.QueueFree();
+                    _chunkHitTriangles.Remove(chunk);
                     _chunkLods.Remove(chunk);
                 }
                 continue;
@@ -684,6 +665,7 @@ public partial class HexPlanet : StaticBody3D
     {
         var visualTool = new SurfaceTool();
         visualTool.Begin(Mesh.PrimitiveType.Triangles);
+        List<VoxelTriangle>? hitTriangles = lod == 0 ? [] : null;
 
         foreach (int cell in _chunkCells[chunkIndex])
         {
@@ -746,17 +728,21 @@ public partial class HexPlanet : StaticBody3D
                     Vector3 wallNormal = (v1 + v2 - normal * topRadius * 2f).Normalized();
 
                     if (!IsOccupied(cell, layer + 1))
-                        AddTriangle(visualTool, topCenter, v1, v2, normal, color, blockType,
+                        AddVoxelTriangle(visualTool, hitTriangles, topCenter, v1, v2, normal, color, blockType,
+                            cell, layer, VoxelFace.Top, -1,
                             new Vector2(0.5f, 0.5f), PolygonUv(i, ring.Length), PolygonUv(next, ring.Length));
                     if (!IsOccupied(cell, layer - 1))
-                        AddTriangle(visualTool, bottomCenter, b2, b1, -normal, wallColor.Darkened(0.15f), blockType,
+                        AddVoxelTriangle(visualTool, hitTriangles, bottomCenter, b2, b1, -normal, wallColor.Darkened(0.15f), blockType,
+                            cell, layer, VoxelFace.Bottom, -1,
                             new Vector2(0.5f, 0.5f), PolygonUv(next, ring.Length), PolygonUv(i, ring.Length));
                     int neighbour = _cellNeighbors[cell][i];
                     if (neighbour < 0 || !IsOccupied(neighbour, layer))
                     {
-                        AddTriangle(visualTool, v1, b1, b2, wallNormal, wallColor, blockType,
+                        AddVoxelTriangle(visualTool, hitTriangles, v1, b1, b2, wallNormal, wallColor, blockType,
+                            cell, layer, VoxelFace.Side, i,
                             new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f));
-                        AddTriangle(visualTool, v1, b2, v2, wallNormal, wallColor, blockType,
+                        AddVoxelTriangle(visualTool, hitTriangles, v1, b2, v2, wallNormal, wallColor, blockType,
+                            cell, layer, VoxelFace.Side, i,
                             new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(1f, 0f));
                     }
                 }
@@ -776,6 +762,7 @@ public partial class HexPlanet : StaticBody3D
 
         if (lod == 0)
         {
+            _chunkHitTriangles[chunkIndex] = hitTriangles!.ToArray();
             if (!_chunkCollisions.TryGetValue(chunkIndex, out CollisionShape3D? collision))
             {
                 collision = new CollisionShape3D { Name = $"TerrainCollision{chunkIndex}" };
@@ -787,8 +774,11 @@ public partial class HexPlanet : StaticBody3D
             collision.Shape = shape;
             collision.Disabled = false;
         }
-        else if (_chunkCollisions.Remove(chunkIndex, out CollisionShape3D? collision))
-            collision.QueueFree();
+        else
+        {
+            _chunkHitTriangles.Remove(chunkIndex);
+            if (_chunkCollisions.Remove(chunkIndex, out CollisionShape3D? collision)) collision.QueueFree();
+        }
     }
 
     private int SharedNeighbour(int cell, int firstFaceIndex, int secondFaceIndex)
@@ -829,6 +819,18 @@ public partial class HexPlanet : StaticBody3D
         tool.SetNormal(normal); tool.SetColor(color); tool.SetUV(AtlasUv(blockType, uvB)); tool.AddVertex(b);
     }
 
+    private static void AddVoxelTriangle(SurfaceTool tool, List<VoxelTriangle>? triangles,
+        Vector3 a, Vector3 b, Vector3 c, Vector3 normal, Color color, int blockType,
+        int cell, int layer, VoxelFace face, int sideEdge, Vector2 uvA, Vector2 uvB, Vector2 uvC)
+    {
+        AddTriangle(tool, a, b, c, normal, color, blockType, uvA, uvB, uvC);
+        // AddTriangle emits a,c,b. Store that exact triangle so interaction,
+        // rendering and the generated ConcavePolygonShape3D cannot disagree.
+        Vector3 geometricNormal = (c - a).Cross(b - a).Normalized();
+        if (geometricNormal.Dot(normal) < 0f) geometricNormal = -geometricNormal;
+        triangles?.Add(new VoxelTriangle(a, c, b, geometricNormal, cell, layer, face, sideEdge));
+    }
+
     private static Texture2D CreateBlockAtlas()
     {
         int width = BlockAtlasTileSize * BlockCatalog.Blocks.Length;
@@ -857,7 +859,7 @@ public partial class HexPlanet : StaticBody3D
         return ImageTexture.CreateFromImage(image);
     }
 
-    private float GeneratedHeightAt(Vector3 direction)
+    private float LegacyGeneratedHeightAt(Vector3 direction)
     {
         float seedOffset = Seed * 0.000173f;
         if (GameSession.Current?.GenerationPreset == "Indev")
@@ -1004,10 +1006,11 @@ public partial class HexPlanet : StaticBody3D
             int layer = _cellLevels[cell];
             float height = layer * BlockHeight;
             Vector3 direction = _vertices[cell];
-            if (!IsOccupied(cell, layer) || NaturalBlockType(direction, height) != 0) continue;
+            if (!IsOccupied(cell, layer) || NaturalBlockType(cell, layer, direction, height) != 0) continue;
             uint hash = (uint)(cell * 747796405 + Seed * 2891336453L);
             hash = (hash ^ (hash >> 16)) * 2246822519u;
-            if (hash % 97u > 7u) continue;
+            float density = _biomeTerrain?.Sample(direction).VegetationDensity ?? (8f / 97f);
+            if (hash % 10000u >= (uint)Mathf.RoundToInt(density * 10000f)) continue;
             candidates.Add((hash, direction * (Radius + height)));
         }
         return candidates.OrderBy(candidate => candidate.Hash).Take(maximum)
@@ -1017,6 +1020,17 @@ public partial class HexPlanet : StaticBody3D
     private Color BiomeColor(Vector3 direction, float height, int sides)
     {
         if (sides == 5) return new Color(0.78f, 0.3f, 0.78f);
+        if (_biomeTerrain != null)
+        {
+            TerrainBiomeSample sample = _biomeTerrain.Sample(direction);
+            return sample.SurfaceBlockType switch
+            {
+                3 => new Color(0.72f, 0.63f, 0.3f),
+                4 => new Color(0.82f, 0.9f, 0.94f),
+                2 => new Color(0.36f, 0.34f, 0.3f),
+                _ => new Color(0.18f, 0.55f, 0.22f).Lightened(Mathf.Clamp(height * 0.006f, 0f, 0.1f))
+            };
+        }
         if (height < -0.45f) return new Color(0.05f, 0.25f, 0.55f);
         float latitude = Mathf.Abs(direction.Y);
         if (latitude > 0.78f) return new Color(0.82f, 0.9f, 0.94f);
@@ -1028,7 +1042,12 @@ public partial class HexPlanet : StaticBody3D
     private Color BlockColor(int cell, int layer, Vector3 direction, float height, int sides)
     {
         if (!_placedVoxelTypes.TryGetValue(VoxelKey(cell, layer), out int type))
+        {
+            if (_biomeTerrain != null)
+                return sides == 5 ? new Color(0.78f, 0.3f, 0.78f)
+                    : BlockCatalog.Get(NaturalBlockType(cell, layer, direction, height)).Color;
             return BiomeColor(direction, height, sides);
+        }
         return BlockCatalog.Get(type).Color;
     }
 
@@ -1036,10 +1055,26 @@ public partial class HexPlanet : StaticBody3D
     {
         return _placedVoxelTypes.TryGetValue(VoxelKey(cell, layer), out int type)
             ? Mathf.Clamp(type, 0, BlockCatalog.Blocks.Length - 1)
-            : NaturalBlockType(direction, height);
+            : NaturalBlockType(cell, layer, direction, height);
     }
 
-    private int NaturalBlockType(Vector3 direction, float height)
+    private int NaturalBlockType(int cell, int layer, Vector3 direction, float height)
+    {
+        if (_biomeTerrain != null)
+        {
+            TerrainBiomeSample sample = _biomeTerrain.Sample(direction);
+            int surfaceLayer = cell >= 0 && cell < _cellLevels.Length
+                ? _cellLevels[cell] : Mathf.RoundToInt(sample.Height / BlockHeight);
+            if (layer >= surfaceLayer) return sample.SurfaceBlockType;
+            // Sand remains several blocks deep; mountains and plains expose
+            // rock below their actual biome-specific surface.
+            if (sample.Biome == TerrainBiome.Desert && layer >= surfaceLayer - 2) return 3;
+            return 2;
+        }
+        return LegacyNaturalBlockType(direction, height);
+    }
+
+    private int LegacyNaturalBlockType(Vector3 direction, float height)
     {
         if (Mathf.Abs(direction.Y) > 0.78f) return 4;
         if (height > StoneHeightThreshold) return 2;

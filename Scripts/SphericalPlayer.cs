@@ -21,6 +21,7 @@ public partial class SphericalPlayer : CharacterBody3D
     private MeshInstance3D _bodyMesh = null!;
     private SpotLight3D _flashlight = null!;
     private MeshInstance3D _flashlightModel = null!;
+    private Node3D _flashlightRig = null!;
     private HexPlanet _planet = null!;
     private float _pitch = -0.22f;
     private bool _surfaceGrounded;
@@ -47,10 +48,14 @@ public partial class SphericalPlayer : CharacterBody3D
     private Vector3 _lastFootstepPosition;
     private float _footstepDistance;
     private Node3D _hands = null!;
+    private Node3D _leftShoulder = null!;
+    private Node3D _rightShoulder = null!;
     private MeshInstance3D _heldItem = null!;
     private string _renderedHeldItem = "";
     private float _handSwing;
     public int FootstepSoundCount { get; private set; }
+    public bool FlashlightUsesRightHandPivot => _flashlightRig.GetParent() == _rightShoulder;
+    public bool HeldItemUsesLeftHandPivot => _heldItem.GetParent() == _leftShoulder;
 
     public override void _Ready()
     {
@@ -59,6 +64,7 @@ public partial class SphericalPlayer : CharacterBody3D
         _bodyMesh = GetNode<MeshInstance3D>("BodyMesh");
         _flashlight = GetNode<SpotLight3D>("Pivot/FlashlightRig/Flashlight");
         _flashlightModel = GetNode<MeshInstance3D>("Pivot/FlashlightRig/FlashlightModel");
+        _flashlightRig = GetNode<Node3D>("Pivot/FlashlightRig");
         _flightLabel = GetNode<Label>("../HUD/FlightLabel");
         _healthLabel = GetNode<Label>("../HUD/HealthLabel");
         _inventory = GetNode<HotbarInventory>("../InventoryUI");
@@ -210,6 +216,7 @@ public partial class SphericalPlayer : CharacterBody3D
                 Vector3 direction = -_camera.GlobalBasis.Z;
                 if (_monsters.TryHit(_camera.GlobalPosition, direction)) return;
                 if (_mobs.TryHit(_camera.GlobalPosition, direction)) return;
+                if (_survival.TryBreakPlacedObject(_camera.GlobalPosition, direction)) return;
                 NatureSystem.ChopResult tree = _nature.TryChop(_camera.GlobalPosition, direction,
                     GameSession.IsCreative || _inventory.SelectedItem is "Axe" or "Stone Axe", out Vector3 woodDrop);
                 if (tree == NatureSystem.ChopResult.Chopped)
@@ -238,11 +245,19 @@ public partial class SphericalPlayer : CharacterBody3D
             {
                 string item = _inventory.SelectedItem;
                 Vector3 spawnDirection = (GlobalPosition - _camera.GlobalBasis.Z * 3f).Normalized();
-                if (!GameSession.IsCreative && _survival.UseSelected(spawnDirection)) { }
+                Vector3 direction = -_camera.GlobalBasis.Z;
+                if (item == "Shears" && GetNode<MobManager>("../MobManager").TryShear(_camera.GlobalPosition, direction, out bool woolProduced))
+                {
+                    if (woolProduced) _inventory.ConsumeToolUse("Shears");
+                }
+                else if (_survival.TryInteract(_camera.GlobalPosition, direction)) { }
+                else if (!GameSession.IsCreative && _survival.UseSelected(spawnDirection)) { }
+                else if (GameSession.IsCreative && (item == "Campfire" || item == "Bed")
+                    && _survival.UseSelected(spawnDirection)) { }
                 else if (item.EndsWith("Egg") && _inventory.ConsumeSelected())
                 {
-                    bool spawned = item is "Chicken Egg" or "Cow Egg"
-                        ? GetNode<MobManager>("../MobManager").SpawnEgg(item.StartsWith("Cow") ? "Cow" : "Chicken", spawnDirection)
+                    bool spawned = item is "Chicken Egg" or "Cow Egg" or "Sheep Egg"
+                        ? GetNode<MobManager>("../MobManager").SpawnEgg(item.StartsWith("Cow") ? "Cow" : item.StartsWith("Sheep") ? "Sheep" : "Chicken", spawnDirection)
                         : GetNode<NightMonsterManager>("../NightMonsterManager").SpawnEgg(item, spawnDirection);
                     if (!spawned && !GameSession.IsCreative) _inventory.AddSelectedItem();
                 }
@@ -498,10 +513,22 @@ public partial class SphericalPlayer : CharacterBody3D
         _camera.AddChild(_hands);
         StandardMaterial3D skin = new() { AlbedoColor = new Color(0.72f, 0.48f, 0.31f), Roughness = 0.9f };
         var handMesh = new BoxMesh { Size = new Vector3(0.16f, 0.18f, 0.42f), Material = skin };
-        _hands.AddChild(new MeshInstance3D { Name = "LeftHand", Mesh = handMesh, Position = new Vector3(-0.3f, -0.05f, 0f), Rotation = new Vector3(-0.24f, 0.12f, -0.08f) });
-        _hands.AddChild(new MeshInstance3D { Name = "RightHand", Mesh = handMesh, Position = new Vector3(0.3f, -0.05f, 0f), Rotation = new Vector3(-0.24f, -0.12f, 0.08f) });
-        _heldItem = new MeshInstance3D { Name = "HeldItem", Position = new Vector3(0.3f, -0.18f, -0.2f) };
-        _hands.AddChild(_heldItem);
+        _leftShoulder = new Node3D { Name = "LeftShoulder", Position = new Vector3(-0.3f, 0.04f, 0.12f) };
+        _rightShoulder = new Node3D { Name = "RightShoulder", Position = new Vector3(0.3f, 0.04f, 0.12f) };
+        _hands.AddChild(_leftShoulder); _hands.AddChild(_rightShoulder);
+        _leftShoulder.AddChild(new MeshInstance3D
+        {
+            Name = "LeftHand", Mesh = handMesh, Position = new Vector3(0f, -0.09f, -0.2f)
+        });
+        _rightShoulder.AddChild(new MeshInstance3D
+        {
+            Name = "RightHand", Mesh = handMesh, Position = new Vector3(0f, -0.09f, -0.2f)
+        });
+        _heldItem = new MeshInstance3D { Name = "HeldItem", Position = new Vector3(0f, -0.18f, -0.38f) };
+        _leftShoulder.AddChild(_heldItem);
+        _flashlightRig.Reparent(_rightShoulder, false);
+        _flashlightRig.Position = new Vector3(0f, -0.12f, -0.39f);
+        _flashlightRig.Rotation = Vector3.Zero;
     }
 
     private void UpdateFirstPersonHands(float delta)
@@ -521,9 +548,15 @@ public partial class SphericalPlayer : CharacterBody3D
                 Material = new StandardMaterial3D { AlbedoColor = colour, Roughness = 0.9f }
             };
         }
+        // The selected item stays in the left hand while the flashlight uses
+        // the right, so both can be visible at the same time.
+        _heldItem.Visible = _heldItem.Mesh != null;
         _handSwing = Mathf.MoveToward(_handSwing, 0f, delta * 5.5f);
         float swing = Mathf.Sin(_handSwing * Mathf.Pi) * 0.85f;
-        _hands.Rotation = new Vector3(-swing * 0.72f, swing * 0.22f, -swing * 0.18f);
+        // Each limb rotates at its own shoulder; the shoulder position itself
+        // never moves, so the arm cannot detach during a strike.
+        _leftShoulder.Rotation = new Vector3(-0.24f - swing * 0.72f, 0.12f + swing * 0.22f, -0.08f + swing * 0.18f);
+        _rightShoulder.Rotation = new Vector3(-0.24f, -0.12f, 0.08f);
     }
 
     private void UpdateFootsteps()
@@ -574,7 +607,9 @@ public partial class SphericalPlayer : CharacterBody3D
         _dead = false;
         Health = 100f;
         if (GameSession.Current is { } world) world.FoodPoisoned = false;
-        GlobalPosition = Vector3.Up * (_planet.SurfaceRadius(Vector3.Up) + GroundClearance + 1.2f);
+        GlobalPosition = _survival.TryGetSafeBedRespawn(out Vector3 bedRespawn)
+            ? bedRespawn
+            : Vector3.Up * (_planet.SurfaceRadius(Vector3.Up) + GroundClearance + 1.2f);
         _airbornePeakRadius = GlobalPosition.Length();
         _deathLabel.Visible = false;
         _deathMenu.Visible = false;

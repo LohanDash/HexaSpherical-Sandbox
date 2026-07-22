@@ -9,6 +9,7 @@ public partial class NightMonsterManager : Node3D
     private const float SimulationStep = 0.1f;
     public int EggMonsterCount => _monsters.Count(monster => monster.FromEgg);
     public int MonsterCount => _monsters.Count;
+    public int MonsterSceneNodeCount => GetChildren().Count(child => child is AnimatableBody3D);
     public Vector3 FirstMonsterAimPosition => _monsters.Count == 0
         ? Vector3.Zero
         : _monsters[0].Body.GlobalPosition + _monsters[0].Body.GlobalPosition.Normalized() * (_monsters[0].Brute ? 0.8f : 0.42f);
@@ -220,7 +221,10 @@ public partial class NightMonsterManager : Node3D
 
     private static void AnimateDeath(Monster monster)
     {
-        monster.Body.ProcessMode = ProcessModeEnum.Disabled;
+        monster.Body.CollisionLayer = 0;
+        monster.Body.CollisionMask = 0;
+        if (monster.Body.GetNodeOrNull<CollisionShape3D>("BodyShape") is { } shape)
+            shape.SetDeferred(CollisionShape3D.PropertyName.Disabled, true);
         SoundManager.Play(SoundKind.MonsterDeath, -10f);
         Tween tween = monster.Body.CreateTween().SetParallel();
         tween.TweenProperty(monster.Model, "rotation:z", monster.Model.Rotation.Z + 1.5f, 0.42f)
