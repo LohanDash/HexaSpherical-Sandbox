@@ -978,6 +978,18 @@ public partial class HexPlanet : StaticBody3D
         return cliffCount > 0;
     }
 
+    public bool ValidateMountainCaveCeiling(out int forbiddenCaves)
+    {
+        forbiddenCaves = 0;
+        if (_biomeTerrain?.Version < 3) return true;
+        for (int cell = 0; cell < _cellLevels.Length; cell++)
+        {
+            for (int layer = 13; layer <= _cellLevels[cell] - 3; layer++)
+                if (IsBaseProceduralCave(cell, layer)) forbiddenCaves++;
+        }
+        return forbiddenCaves == 0;
+    }
+
     private int SharedNeighbour(int cell, int firstFaceIndex, int secondFaceIndex)
     {
         var first = _faces[firstFaceIndex];
@@ -1155,6 +1167,13 @@ public partial class HexPlanet : StaticBody3D
     {
         bool indev = GameSession.Current?.GenerationPreset == "Indev";
         int caveCeiling = indev ? _cellLevels[cell] - 3 : _cellLevels[cell] - 1;
+        // V3 mountains can rise more than eighty metres. Extending the cave
+        // field through that whole mass perforates every exposed cliff and
+        // turns distant ranges into Swiss cheese. Keep ordinary caves inside
+        // the playable crust; rare entrance shafts remain responsible for
+        // connecting a high surface to this underground network.
+        if (_biomeTerrain?.Version >= 3)
+            caveCeiling = Math.Min(caveCeiling, 12);
         if (layer < MinimumLayer + 1 || layer > caveCeiling) return false;
         Vector3 p = _vertices[cell];
         float seedOffset = Seed * 0.00137f;

@@ -29,6 +29,8 @@ public partial class PlanetGenerationTest : Node
                 throw new InvalidOperationException("Indev planet dimensions are incorrect.");
             if (!planet.ValidateDistantCliffCoverage(out int cliffCount))
                 throw new InvalidOperationException("Distant LOD leaves at least one mountain cliff open.");
+            if (!planet.ValidateMountainCaveCeiling(out int forbiddenMountainCaves))
+                throw new InvalidOperationException($"V3 mountain mass contains {forbiddenMountainCaves} caves above the crust ceiling.");
             double maximumFrameMilliseconds = 0;
             for (int frame = 0; frame < 24; frame++)
             {
